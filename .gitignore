@@ -1,5 +1,11 @@
 .env
 __pycache__/
+out/
+frontend/node_modules/
+frontend/dist/
+.pytest_cache/
+
+PLAN.md
 
 # don't assume they're using UV
-uv.lock
+# uv.lock
