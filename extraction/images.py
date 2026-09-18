@@ -114,10 +114,12 @@ def harvest(
     bundle: CandidateBundle | None = None,
     base_url: str | None = None,
 ) -> list[str]:
-    """Every full-resolution product image on the page, best source first.
+    """Every product photo on the page, at full resolution, best source first.
 
-    Declared sources come from the bundle rather than being re-parsed here, so
-    JSON-LD and microdata image handling has one owner.
+    Takes the images the site declared, adds anything else the markup references,
+    filters out interface graphics like logos and icons, and rewrites each URL to ask
+    for the original rather than a thumbnail. The declared ones come from the bundle
+    rather than being re-parsed, so JSON-LD and microdata images have one owner.
     """
     if base_url is None:
         base_url = canonical_url(soup)
@@ -146,11 +148,11 @@ def harvest(
 def _restrict_to_declared_hosts(
     scraped: list[str], declared: list[str], base_url: str | None
 ) -> list[str]:
-    """Keep only scraped images served from wherever the declared ones live.
+    """Drop scraped images not served from the same host as the declared ones.
 
-    Megamenu promotions, review snapshots and ad creative are real images on real
-    CDNs, so filename and size filtering cannot tell them apart -- but the host that
-    serves the declared gallery can. With nothing declared, everything is kept.
+    Menu promotions, review photos and ad creative are real images on real CDNs, so
+    filename and size checks cannot spot them, but the host serving the official
+    gallery can. If the page declared nothing, everything is kept.
     """
     hosts = {
         urlparse(url).netloc.lower()
@@ -182,10 +184,10 @@ def _restrict_to_declared_hosts(
 
 
 def _declared(bundle: CandidateBundle) -> list[str]:
-    """Image URLs the site published, strongest provenance first.
+    """Image URLs the site published itself, from JSON-LD, microdata and og:image.
 
-    Variant images count: a ProductGroup often carries none of its own and hangs
-    the photography off each variant instead.
+    Images attached to variants count too, since a product group often carries no
+    photos of its own and hangs them off each variant instead.
     """
     entries: list[tuple[str, int, str]] = []
     sequence = 0
@@ -208,7 +210,11 @@ def _declared(bundle: CandidateBundle) -> list[str]:
 
 
 def _from_dom(soup: BeautifulSoup) -> list[str]:
-    """Images the markup references, declared hints first."""
+    """Images found by walking the HTML itself, for pages that declared none.
+
+    Skips anything inside navigation, headers and footers, since those are the site's
+    furniture rather than the product.
+    """
     found: list[str] = []
 
     # A preload hint is the page telling the browser which image matters most.
@@ -256,6 +262,7 @@ def _from_dom(soup: BeautifulSoup) -> list[str]:
 
 
 def _is_chrome(element: Tag) -> bool:
+    """True if this image sits in navigation, a header, a footer or a sidebar."""
     for parent in element.parents:
         if parent.name in _CHROME_ANCESTORS:
             return True
@@ -266,7 +273,7 @@ def _is_chrome(element: Tag) -> bool:
 
 
 def _is_icon(element: Tag) -> bool:
-    """Reject images the markup itself declares to be small."""
+    """True if the markup's own width/height attributes say this is icon-sized."""
     for attr in ("width", "height"):
         raw = element.get(attr)
         if not isinstance(raw, str):
@@ -278,10 +285,10 @@ def _is_icon(element: Tag) -> bool:
 
 
 def _widest_srcset(srcset: str | None) -> str | None:
-    """The largest candidate in a srcset attribute.
+    """Pick the biggest image from a srcset, which lists one image at several widths.
 
-    Parsed per the spec's grammar rather than by splitting on commas, because a
-    transformation-bearing CDN URL contains commas of its own.
+    Follows the spec's grammar instead of just splitting on commas, because a CDN URL
+    with resize instructions in it contains commas of its own.
     https://html.spec.whatwg.org/multipage/images.html#srcset-attributes
     """
     if not isinstance(srcset, str) or not srcset.strip():
@@ -322,7 +329,11 @@ def _widest_srcset(srcset: str | None) -> str | None:
 
 
 def normalize(url: str, base: str | None = None) -> str | None:
-    """Absolute URL for the largest rendition, or None if unusable."""
+    """Turn one image URL into a full-size absolute URL, or None if it isn't usable.
+
+    Strips the parts of a URL that request a smaller version, so the CDN returns its
+    original. Relative URLs are completed using the page's own address.
+    """
     if not isinstance(url, str):
         return None
     candidate = url.strip()
@@ -369,7 +380,11 @@ def normalize(url: str, base: str | None = None) -> str | None:
 
 
 def _is_media(host: str, path: str) -> bool:
-    """Reject URLs that serve interface furniture or measurement, not photographs."""
+    """True if this URL looks like a real photo rather than an icon or a tracker.
+
+    Checks the file extension, the filename, the path, and the host. Words like "logo"
+    only count as whole words, so "ace_logo.png" is rejected but "flagship" is not.
+    """
     lowered_host = host.lower()
     if any(hint in lowered_host for hint in _NON_MEDIA_HOST_HINTS):
         return False
@@ -394,7 +409,10 @@ def _is_media(host: str, path: str) -> bool:
 
 
 def _dedupe_key(url: str) -> str:
-    """Identity of the image, ignoring which encoding was requested."""
+    """A key for spotting duplicates, ignoring the requested file format.
+
+    One photo offered as both webp and jpeg is one photo, not two gallery entries.
+    """
     parts = urlparse(url)
     pairs = [
         (key, value)
@@ -407,7 +425,7 @@ def _dedupe_key(url: str) -> str:
 
 
 def _is_tracking_pixel(query_pairs: list[tuple[str, str]]) -> bool:
-    """A one-pixel request is a beacon, not a photograph."""
+    """True if the URL asks for a 1x1 image, which is an analytics beacon."""
     dimensions = []
     for key, value in query_pairs:
         if key.lower() in {"w", "h", "width", "height", "wid", "hei"}:
@@ -419,11 +437,11 @@ def _is_tracking_pixel(query_pairs: list[tuple[str, str]]) -> bool:
 
 
 def _strip_transform_segments(path: str) -> str:
-    """Drop path segments that are resize instructions rather than location.
+    """Remove resize instructions built into a URL path, like "/w_640,c_limit/".
 
-    Only the directive-shaped form ("w_640,c_limit") is removed. A bare NNNxNNN
-    segment is not: it is as often the directory holding the original, and removing
-    it turns a working full-resolution URL into a 404.
+    Only that directive shape is removed. A plain "800x600" segment is left alone,
+    because it is just as often the folder holding the original, and removing it turns
+    a working URL into a 404.
     """
     segments = path.split("/")
     kept = [

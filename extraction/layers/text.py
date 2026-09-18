@@ -104,7 +104,12 @@ _MAX_PRICE = 1_000_000.0
 _MAX_PRICE_CANDIDATES = 4
 
 def extract(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
-    """Add tier-D candidates from rendered text."""
+    """Read the visible text on the page and add what it finds as tier D.
+
+    The last resort, and the only source on a page that declares nothing. A number next
+    to a currency symbol might be the price, a delivery threshold or a saving, so each
+    candidate carries context and the decision is left to the model.
+    """
     text = _visible_text(soup)
 
     _map_prices(text, soup, bundle)
@@ -113,7 +118,11 @@ def extract(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
 
 
 def _visible_text(soup: BeautifulSoup) -> str:
-    """Concatenate the strings a shopper can read, without touching the tree."""
+    """All the text a shopper can actually see, skipping hidden elements.
+
+    Deliberately does not delete script tags to get there, because that would destroy
+    the only copy of the price on pages that publish it as JSON-LD.
+    """
     parts: list[str] = []
     for string in soup.strings:
         if _hidden(string):
@@ -125,6 +134,7 @@ def _visible_text(soup: BeautifulSoup) -> str:
 
 
 def _hidden(string: NavigableString) -> bool:
+    """True if a shopper cannot see this text, so it should not count as visible."""
     for parent in string.parents:
         if parent.name in _NON_VISIBLE:
             return True
@@ -135,6 +145,11 @@ def _hidden(string: NavigableString) -> bool:
 
 
 class _Reading:
+    """One price found in the text, with its currency and where in the text it was.
+
+    The position is what lets us spot two prices printed next to each other.
+    """
+
     __slots__ = ("amount", "iso", "position")
 
     def __init__(self, amount: float, iso: str | None, position: int) -> None:
@@ -144,6 +159,7 @@ class _Reading:
 
 
 def _scan_prices(text: str) -> list[_Reading]:
+    """Find every price-looking number in the text, keeping where each was found."""
     readings: list[_Reading] = []
     for match in _PRICE_RE.finditer(text):
         token = match.group("cur_before") or match.group("cur_after")
@@ -158,6 +174,7 @@ def _scan_prices(text: str) -> list[_Reading]:
 
 
 def _token_to_iso(token: str | None) -> str | None:
+    """Turn a currency symbol or code into a three-letter code, if it's unambiguous."""
     if not token:
         return None
     if token.upper() in _ISO_CODES:
@@ -166,6 +183,11 @@ def _token_to_iso(token: str | None) -> str | None:
 
 
 def _map_prices(text: str, soup: BeautifulSoup, bundle: CandidateBundle) -> None:
+    """Add every distinct price found in the text as its own candidate.
+
+    All of them are offered rather than one being picked, because from here there is no
+    way to tell the product's price from a delivery threshold or a saving.
+    """
     readings = _scan_prices(text)
     if not readings:
         return
@@ -195,7 +217,10 @@ def _map_prices(text: str, soup: BeautifulSoup, bundle: CandidateBundle) -> None
 
 
 def _map_sale_pair(readings: list[_Reading], bundle: CandidateBundle) -> None:
-    """Two adjacent prices in the was/now pattern."""
+    """Spot two prices side by side, which is how pages show "was £30, now £24".
+
+    The higher one becomes the former price and the lower the current one.
+    """
     for first, second in zip(readings, readings[1:]):
         if second.position - first.position > _SALE_MAX_DISTANCE:
             continue
@@ -212,10 +237,11 @@ def _map_sale_pair(readings: list[_Reading], bundle: CandidateBundle) -> None:
 def _map_currency(
     readings: list[_Reading], soup: BeautifulSoup, bundle: CandidateBundle
 ) -> None:
-    """Resolve currency, and be explicit when the answer was inferred.
+    """Work out the currency, and say so in the source when it had to be guessed.
 
-    The word "inferred" in the source string is a contract: the escalation policy
-    greps for it to treat a guessed currency as weak extraction.
+    A "£" is unambiguous but a "$" is not, so the page's region decides. Writing the
+    word "inferred" into the source label is a contract: escalation searches for it and
+    treats a guessed currency as a sign the page went badly.
     """
     for reading in readings:
         if reading.iso:
@@ -245,7 +271,10 @@ def _map_currency(
 
 
 def _document_region(soup: BeautifulSoup) -> str | None:
-    """Region subtag from html[lang], else from an hreflang alternate."""
+    """Which country this page is for, from <html lang> or an hreflang link.
+
+    Used to tell an ambiguous "$" apart: en-GB means pounds, en-US means dollars.
+    """
     html = soup.find("html")
     if html is not None:
         lang = html.get("lang")
@@ -263,17 +292,18 @@ def _document_region(soup: BeautifulSoup) -> str | None:
 
 
 def _map_name(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
-    """The first h1."""
+    """The page's first <h1>, which is nearly always the product name."""
     heading = soup.find("h1")
     if heading is not None:
         bundle.add(NAME, heading.get_text(" ", strip=True), f"{SOURCE} first <h1>", Tier.D)
 
 
 def _map_key_features(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
-    """Bullet lists in the main content, the only structured source for this field.
+    """Bullet lists from the main part of the page, as candidate feature lists.
 
-    A list qualifies when it has several short items that are not predominantly
-    links, which excludes nav menus and breadcrumbs without naming a class.
+    No standard publishes a feature list, so a <ul> is the only structured place one can
+    come from. A list counts if it has several short items that are mostly not links,
+    which rules out menus and breadcrumbs without naming a single CSS class.
     """
     root = soup.find("main") or soup.find(attrs={"role": "main"}) or soup.find("body") or soup
 
@@ -291,6 +321,7 @@ def _map_key_features(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
 
 
 def _is_chrome(element: Tag) -> bool:
+    """True if this sits in navigation, a header or a footer rather than the content."""
     for parent in element.parents:
         if parent.name in {"nav", "header", "footer", "aside", "form"}:
             return True
@@ -300,6 +331,7 @@ def _is_chrome(element: Tag) -> bool:
 
 
 def _feature_items(list_element: Tag) -> list[str]:
+    """The text of a list's items, if it looks like features rather than a menu."""
     items: list[str] = []
     linky = 0
     for item in list_element.find_all("li", recursive=False):

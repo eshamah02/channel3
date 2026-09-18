@@ -85,7 +85,12 @@ _MIN_ATTR_JSON_LENGTH = 40
 
 
 def extract(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
-    """Add tier-C candidates from the richest product-shaped dict on the page."""
+    """Find the product data a JavaScript site left in the page, and add it as tier C.
+
+    Sites built with React and similar frameworks embed a blob of JSON to build the
+    page from. It often holds exact prices, but nothing in it is *declared* to mean
+    anything, so we infer meaning from key names and rank it below the standards.
+    """
     best: dict[str, Any] | None = None
     best_score = 0
     best_origin = ""
@@ -110,6 +115,7 @@ def extract(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
 
 
 def _map(node: dict[str, Any], bundle: CandidateBundle, source: str) -> None:
+    """Read one product-shaped chunk of JSON and add its fields to the bundle."""
     lookup = _normalised(node)
 
     bundle.add(NAME, _first_text(lookup, _NAME_KEYS), f"{source} name", Tier.C)
@@ -131,7 +137,11 @@ def _map(node: dict[str, Any], bundle: CandidateBundle, source: str) -> None:
 
 
 def _payloads(soup: BeautifulSoup) -> Iterator[tuple[str, Any]]:
-    """Yield (origin label, parsed JSON) from the three places it hides."""
+    """Find and parse the JSON blobs on the page, with a label saying where each was.
+
+    Looks in three places: JSON script tags, assignments in ordinary scripts, and
+    data- attributes.
+    """
     for script in soup.find_all("script"):
         script_type = (script.get("type") or "").strip().lower()
         raw = script.string or script.get_text()
@@ -170,6 +180,7 @@ def _payloads(soup: BeautifulSoup) -> Iterator[tuple[str, Any]]:
 
 
 def _loads(raw: str) -> Any | None:
+    """Parse JSON, returning None instead of raising if it is malformed."""
     try:
         return json.loads(raw)
     except (json.JSONDecodeError, ValueError):
@@ -177,7 +188,11 @@ def _loads(raw: str) -> Any | None:
 
 
 def _loads_span(raw: str) -> Any | None:
-    """Parse the outermost {...} in a script body."""
+    """Pull the outermost {...} out of a script and parse it.
+
+    Needed because the JSON is usually surrounded by JavaScript, as in
+    `window.state = {...};`, which is not valid JSON on its own.
+    """
     start = raw.find("{")
     end = raw.rfind("}")
     if start == -1 or end <= start:
@@ -186,11 +201,15 @@ def _loads_span(raw: str) -> Any | None:
 
 
 def _normalise_key(key: str) -> str:
+    """Lowercase a key and drop its underscores, so "list_price" matches "listPrice"."""
     return key.replace("_", "").replace("-", "").casefold()
 
 
 def _normalised(node: dict[str, Any]) -> dict[str, Any]:
-    """Key lookup that ignores case and underscore convention."""
+    """Re-key a dict so lookups ignore case and underscores.
+
+    Lets one lookup find "listPrice", "list_price" and "listprice" alike.
+    """
     out: dict[str, Any] = {}
     for key, value in node.items():
         if isinstance(key, str):
@@ -199,10 +218,10 @@ def _normalised(node: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is_product_shaped(node: dict[str, Any]) -> bool:
-    """A name plus either a price or an identifier.
+    """Does this chunk of JSON look like a product? It needs a name plus a price or id.
 
-    Two signals rather than one: a nav entry has a name and a rating has a value,
-    but only a product record has both.
+    Two signals rather than one, because a menu entry has a name and a star rating has
+    a number, but only a product record has both.
     """
     lookup = _normalised(node)
 
@@ -214,7 +233,11 @@ def _is_product_shaped(node: dict[str, Any]) -> bool:
 
 
 def _score(node: dict[str, Any]) -> int:
-    """How completely this dict describes a product."""
+    """Rate how fully this JSON describes a product, so the best one can be chosen.
+
+    A page may embed dozens of product-shaped chunks; the one being sold is the most
+    complete.
+    """
     lookup = _normalised(node)
     groups = (
         _NAME_KEYS,
@@ -231,12 +254,16 @@ def _score(node: dict[str, Any]) -> int:
 
 
 def _product_shaped(payload: Any) -> Iterator[dict[str, Any]]:
-    """Walk the payload yielding product-shaped dicts, within bounds."""
+    """Search nested JSON for anything product-shaped, with depth and count limits.
+
+    The limits matter: these blobs can be enormous, and an unbounded search would hang.
+    """
     budget = [_MAX_NODES]
     yield from _walk(payload, 0, budget)
 
 
 def _walk(node: Any, depth: int, budget: list[int]) -> Iterator[dict[str, Any]]:
+    """Recurse through JSON, yielding product-shaped dicts until the budget runs out."""
     if depth > _MAX_DEPTH or budget[0] <= 0:
         return
     budget[0] -= 1
@@ -254,6 +281,7 @@ def _walk(node: Any, depth: int, budget: list[int]) -> Iterator[dict[str, Any]]:
 
 
 def _first_text(lookup: dict[str, Any], keys: frozenset[str]) -> str | None:
+    """The first of these keys that holds usable text, or None."""
     for key in keys:
         value = lookup.get(key)
         if isinstance(value, str) and value.strip():
@@ -264,6 +292,7 @@ def _first_text(lookup: dict[str, Any], keys: frozenset[str]) -> str | None:
 
 
 def _first_number(lookup: dict[str, Any], keys: frozenset[str]) -> float | None:
+    """The first of these keys that holds a number, or None."""
     for key in keys:
         value = lookup.get(key)
         # Nested money objects are common: {"amount": 20, "currency": "USD"}.
@@ -281,6 +310,7 @@ def _first_number(lookup: dict[str, Any], keys: frozenset[str]) -> float | None:
 
 
 def _first_list(lookup: dict[str, Any], keys: frozenset[str]) -> list[str]:
+    """The first of these keys that holds a list of strings, or an empty list."""
     for key in keys:
         values = coerce_text_list(lookup.get(key))
         if values:
@@ -289,6 +319,7 @@ def _first_list(lookup: dict[str, Any], keys: frozenset[str]) -> list[str]:
 
 
 def _brand(lookup: dict[str, Any]) -> str | None:
+    """The brand name, whether stored as a string or nested in an object."""
     for key in _BRAND_KEYS:
         value = lookup.get(key)
         if isinstance(value, str) and value.strip():

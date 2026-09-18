@@ -66,10 +66,10 @@ class ExtractionError(RuntimeError):
 
 
 def build_bundle(html: str) -> tuple[CandidateBundle, BeautifulSoup]:
-    """Extract every candidate from one page.
+    """Run all six layers over one page and collect everything they find.
 
-    Returns the tree alongside the bundle because later stages need it too: image
-    harvesting walks it, and the prose and escalation calls serialise it.
+    Also returns the parsed tree, because later steps need it: image harvesting walks
+    it, and the description and escalation calls turn it back into text.
     """
     soup = parse(html)
     bundle = CandidateBundle()
@@ -84,6 +84,11 @@ def build_bundle(html: str) -> tuple[CandidateBundle, BeautifulSoup]:
 def _facts_messages(
     bundle: CandidateBundle, *, variants_declared: bool
 ) -> list[dict[str, Any]]:
+    """Build the prompt for the facts call: instructions plus the candidates as JSON.
+
+    When the page already published a real variant matrix, the variants are left out
+    of the prompt entirely, since on a product with many sizes they would be most of it.
+    """
     system = prompts.FACTS_SYSTEM + (
         prompts.AXES_ALREADY_DECLARED if variants_declared else prompts.AXES_FROM_PICKERS
     )
@@ -102,6 +107,7 @@ def _facts_messages(
 
 
 def _prose_messages(soup: BeautifulSoup, name: str, brand: str) -> list[dict[str, Any]]:
+    """Build the prompt for the description call: the stripped-down page as text."""
     excerpt = semantic_html(soup, max_chars=_PROSE_EXCERPT_CHARS)
     return [
         {"role": "system", "content": prompts.PROSE_SYSTEM},
@@ -118,7 +124,11 @@ def _prose_messages(soup: BeautifulSoup, name: str, brand: str) -> list[dict[str
 
 
 def _check_facts(facts: FactsResponse) -> None:
-    """Semantic checks the JSON schema cannot express."""
+    """Reject an answer that fits the schema but is obviously wrong.
+
+    A negative price and a two-letter currency code are both valid JSON. Raises with
+    a message that gets sent back to the model as the correction to make.
+    """
     if not facts.name.strip():
         raise ValueError("name was empty; give the product's name.")
     if not facts.brand.strip():
@@ -135,9 +145,11 @@ def _check_facts(facts: FactsResponse) -> None:
 async def _facts(
     bundle: CandidateBundle, client: LLMClient, *, variants_declared: bool
 ) -> tuple[FactsResponse, int]:
-    """Resolve the facts. Returns the response and how many repairs it needed.
+    """Ask the model to choose between the candidates. This is the main AI call.
 
-    The repair count feeds the escalation policy.
+    Retries up to three times, telling the model what was wrong each time. Returns the
+    answer plus how many retries it took, which feeds into deciding whether the page
+    needs a second look.
     """
     messages = _facts_messages(bundle, variants_declared=variants_declared)
     complaint: str | None = None
@@ -179,6 +191,12 @@ async def _facts(
 async def _prose(
     soup: BeautifulSoup, facts: FactsResponse, client: LLMClient
 ) -> ProseResponse:
+    """Ask the model to write the description and feature list.
+
+    A separate call because these are the only fields no standard publishes, so they
+    need the page's text rather than the candidate list. Failure is not fatal: a
+    product with no description is still worth serving.
+    """
     result = await client.parse(
         model=PROSE_MODEL,
         input=_prose_messages(soup, facts.name, facts.brand),
@@ -196,7 +214,11 @@ async def _prose(
 
 
 def _declared_variants(bundle: CandidateBundle) -> list[Variant]:
-    """Variants from a machine-readable statement of the matrix, if any."""
+    """Variants the page actually published as data, or an empty list if it didn't.
+
+    Only trusted from the top two tiers, where the page stated the combinations
+    itself rather than us reading them off pickers.
+    """
     candidates = bundle.all_at_best_tier(VARIANTS)
     if candidates and candidates[0].tier in _DECLARED_TIERS:
         return [candidate.value for candidate in candidates]
@@ -204,9 +226,10 @@ def _declared_variants(bundle: CandidateBundle) -> list[Variant]:
 
 
 def _variants_from_axes(axes: list[VariantAxis]) -> list[Variant]:
-    """One single-axis Variant per observed value.
+    """Make one variant per option value, used when the page published no real matrix.
 
-    A picker reveals the axes, not the combinations, so none is invented here.
+    A size picker tells you the sizes exist, not which colour/size pairs are buyable,
+    so each value becomes its own variant and no combination is invented.
     """
     out: list[Variant] = []
     for axis in axes:
@@ -227,12 +250,12 @@ def _variants_from_axes(axes: list[VariantAxis]) -> list[Variant]:
 def _price_of(
     facts: FactsResponse, bundle: CandidateBundle, warnings: list[str]
 ) -> Price:
-    """Build the Price, with compare_at_price grounded in the candidates.
+    """Build the final Price, throwing out any invented "was" price.
 
-    A compare-at at or below the price is a discount of nothing. And it must match a
-    candidate offered for that field: observed on a real page, the model promoted a
-    free-delivery threshold into a former price and invented a saving. Missing a
-    genuine sale is the smaller error.
+    A former price has to clear two bars: it must be higher than the current price,
+    and some layer must have found it specifically as a former price. On a real page
+    the model turned a free-delivery threshold ("orders above 200 USD") into a fake
+    discount, and this is what stops that. Missing a real sale is the lesser evil.
     """
     compare_at = facts.compare_at_price
     if compare_at is None:

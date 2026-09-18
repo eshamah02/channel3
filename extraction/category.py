@@ -40,9 +40,10 @@ class CategoryError(RuntimeError):
 
 
 def _build_tree() -> dict[str, dict]:
-    """Nested dict of the taxonomy, preserving file order at every level.
+    """Turn the flat category file into a nested tree, keeping the file's order.
 
-    Order is kept rather than sorted because it is how the options are numbered.
+    "Apparel > Shoes" and "Apparel > Hats" become {"Apparel": {"Shoes": {}, "Hats": {}}}.
+    Order is preserved because it decides how the options get numbered.
     """
     tree: dict[str, dict] = {}
     with open(CATEGORIES_FILE, encoding="utf-8") as handle:
@@ -61,7 +62,7 @@ TREE = _build_tree()
 
 
 def children_of(path: Sequence[str] | None = None) -> list[str]:
-    """Immediate children of a node, or the top-level entries for None."""
+    """The categories directly below a given one. Pass None for the 21 top-level ones."""
     node = TREE
     for part in path or ():
         node = node.get(part)
@@ -92,7 +93,10 @@ product.
 
 
 def _options(children: list[str], path: list[str], allow_stop: bool) -> tuple[str, int]:
-    """Render the numbered choices, returning the text and the stop index."""
+    """Format the choices as a numbered list, with an optional "none of these" entry.
+
+    Returns the text and the number assigned to that last option, or 0 if not offered.
+    """
     lines = [f"{index}. {child}" for index, child in enumerate(children, start=1)]
     stop_index = 0
     if allow_stop:
@@ -111,6 +115,7 @@ def _messages(
     allow_stop: bool,
     complaint: str | None,
 ) -> list[dict[str, Any]]:
+    """Build the prompt for one step: the product, where we are, and the options."""
     options, _ = _options(children, path, allow_stop)
     position = SEPARATOR.join(path) if path else "(top level)"
     body = (
@@ -137,7 +142,11 @@ async def _choose(
     model: str,
     allow_stop: bool,
 ) -> int | None:
-    """Index of the chosen child, or None to stop at the current node."""
+    """Ask the model to pick one category from a numbered list.
+
+    Returns the position of its choice, or None if it says none of them fit. Because
+    the answer is a number, the model cannot name a category that does not exist.
+    """
     _, stop_index = _options(children, path, allow_stop)
     highest = stop_index or len(children)
     complaint: str | None = None
@@ -177,10 +186,11 @@ async def _descend(
     model: str,
     exclude: frozenset[str] = frozenset(),
 ) -> tuple[list[str], bool]:
-    """One pass down the tree, optionally barring some top-level entries.
+    """Walk down the tree one level at a time until the model stops descending.
 
-    Returns the path and whether it ended at a leaf; see resolve_category for why
-    that matters.
+    Returns the path found, plus whether it stopped because the tree ran out (which is
+    a good sign) or because the model rejected every option (often a wrong branch).
+    `exclude` lets a retry skip a starting branch that already failed.
     """
     path: list[str] = []
 

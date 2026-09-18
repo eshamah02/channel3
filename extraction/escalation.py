@@ -58,10 +58,16 @@ _REASONING: dict[str, Any] = {"effort": "low"}
 
 
 def score_tiers(bundle: CandidateBundle, product: Product) -> dict[str, str]:
-    """Provenance tier of each assembled field, by matching the value back."""
+    """Work out which source each final value came from: {"price.price": "A", ...}.
+
+    Takes each value in the finished product and searches the candidates for one that
+    matches it. The tier of that candidate is the answer, or E if nothing matches,
+    which means the model produced it without a source.
+    """
     tiers: dict[str, str] = {}
 
     def score(field: str, value: Any) -> None:
+        """Look up where one field's value came from and note its tier."""
         if value is None or value == [] or value == "":
             return
         candidate = _matching_candidate(bundle, field, value)
@@ -85,7 +91,7 @@ def score_tiers(bundle: CandidateBundle, product: Product) -> dict[str, str]:
 def _matching_candidate(
     bundle: CandidateBundle, field: str, value: Any
 ) -> Candidate | None:
-    """Strongest candidate whose value is the source of this one, if any."""
+    """Find the best-sourced candidate that this final value came from, or None."""
     matches: list[Candidate] = []
 
     for candidate in bundle.for_field(field):  # already ordered strongest first
@@ -108,6 +114,11 @@ def _matching_candidate(
 
 
 def _matches_via_variant(field: str, value: Any, variant: Any) -> bool:
+    """Look for a value inside a variant candidate.
+
+    Colours and images also live within variants, so a colour found only there still
+    has a real source rather than looking invented.
+    """
     if field == IMAGE_URLS:
         return _image_match(value, getattr(variant, "image_urls", []) or [])
     axis_values = [pair.value for pair in getattr(variant, "option_values", [])]
@@ -115,6 +126,11 @@ def _matches_via_variant(field: str, value: Any, variant: Any) -> bool:
 
 
 def _matches(field: str, final: Any, candidate: Any) -> bool:
+    """Is this final value the same thing as this candidate?
+
+    Comparison depends on the type: prices to two decimal places, images through
+    normalisation, text allowing for trimming, variants on their option pairs.
+    """
     if field == IMAGE_URLS:
         return _image_match(final, candidate)
     if isinstance(final, (int, float)) and not isinstance(final, bool):
@@ -131,10 +147,10 @@ def _matches(field: str, final: Any, candidate: Any) -> bool:
 
 
 def _text_match(final: str, candidate: Any) -> bool:
-    """Equal, or the final value is what remains after trimming the candidate.
+    """Do two strings match, allowing the final one to be a trimmed-down version?
 
-    A name stripped of shop furniture should be credited to the title it was
-    trimmed from rather than counted as invention.
+    We asked the model to strip shop names and taglines off the product name, so the
+    result should still count as coming from the title it was trimmed from.
     """
     if isinstance(candidate, list):
         return any(_text_match(final, item) for item in candidate)
@@ -148,11 +164,16 @@ def _text_match(final: str, candidate: Any) -> bool:
 
 
 def _normalise_text(value: str) -> str:
+    """Lowercase and tidy whitespace, so two spellings of one value compare equal."""
     return collapse(value).casefold()
 
 
 def _image_match(final: Any, candidate: Any) -> bool:
-    """Compare through normalisation, since harvesting rewrote the URLs."""
+    """Do these image URLs match once both sides are normalised?
+
+    Needed because harvesting rewrote the URLs to request full resolution, so they no
+    longer look like what the page contained.
+    """
     finals = final if isinstance(final, list) else [final]
     candidates = candidate if isinstance(candidate, list) else [candidate]
     normalised = {
@@ -165,6 +186,7 @@ def _image_match(final: Any, candidate: Any) -> bool:
 
 
 def _variant_match(final: Any, candidate: Any) -> bool:
+    """Are these the same variant, i.e. exactly the same set of option pairs?"""
     if not hasattr(candidate, "option_values"):
         return False
     left = {(pair.name, pair.value) for pair in final.option_values}
@@ -183,10 +205,11 @@ def needs_escalation(
     *,
     repairs: int = 0,
 ) -> list[str]:
-    """Reasons this page looks weakly extracted. Empty means it looks fine.
+    """List the reasons this page looks badly extracted. An empty list means it's fine.
 
-    An empty variant list is deliberately not a trigger: plenty of products
-    legitimately have none.
+    Checks whether the important fields have a real source: a price only found in
+    visible text, a guessed currency, a brand taken from the shop's own name. Having
+    no variants is deliberately not a reason, since plenty of products have none.
     """
     reasons: list[str] = []
 
@@ -259,7 +282,11 @@ async def escalate(
     *,
     model: str = ESCALATION_MODEL,
 ) -> FactsResponse | None:
-    """One re-read of the whole page with a stronger model. Never a loop."""
+    """Ask a stronger model to re-read the whole page. Returns its answer, or None.
+
+    Runs at most once per page, never in a loop, and it is told which fields were
+    weak so it knows where to concentrate.
+    """
 
     weak = [field for field in _ESCALATABLE if tiers.get(field, Tier.E.value) not in _TRUSTED]
     excerpt = semantic_html(soup, max_chars=_ESCALATION_CHARS)
@@ -291,14 +318,17 @@ async def escalate(
 def merge(
     product: Product, facts: FactsResponse, tiers: dict[str, str]
 ) -> tuple[Product, list[str]]:
-    """Replace only weakly-sourced fields. Returns the product and what changed.
+    """Take the second model's answers, but only for fields that were weak before.
 
-    Wholesale replacement would trade a declared price for an inference over prose.
+    Returns the updated product and a list describing what changed. Fields already
+    sourced from the site's own product data are left alone, since replacing those
+    would trade a declared price for a guess made from prose.
     """
     changes: list[str] = []
     updates: dict[str, Any] = {}
 
     def weak(field: str) -> bool:
+        """True if this field did not come from the site's own product data."""
         return tiers.get(field, Tier.E.value) not in _TRUSTED
 
     if weak(NAME) and facts.name.strip() and facts.name.strip() != product.name:

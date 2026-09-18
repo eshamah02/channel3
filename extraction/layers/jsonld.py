@@ -59,7 +59,11 @@ _OUT_OF_STOCK = frozenset({"outofstock", "soldout", "discontinued"})
 
 
 def extract(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
-    """Add tier-A candidates from every JSON-LD product node on the page."""
+    """Read the page's JSON-LD and add what it finds to the bundle as tier A.
+
+    JSON-LD is a block of JSON in a script tag where the site states outright that the
+    page is a product and what it costs, so it is the most trustworthy source there is.
+    """
     for index, node in enumerate(_product_nodes(soup)):
         # Several product nodes is unusual but legal; the suffix keeps the
         # provenance readable when it happens.
@@ -68,7 +72,7 @@ def extract(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
 
 
 def _product_nodes(soup: BeautifulSoup) -> list[dict[str, Any]]:
-    """Every Product/ProductGroup node across all ld+json scripts."""
+    """Find every block of JSON-LD on the page that describes a product."""
     nodes: list[dict[str, Any]] = []
     for payload in _payloads(soup):
         nodes.extend(_find_products(payload))
@@ -76,9 +80,10 @@ def _product_nodes(soup: BeautifulSoup) -> list[dict[str, Any]]:
 
 
 def _payloads(soup: BeautifulSoup) -> Iterator[Any]:
-    """Parse each ld+json script independently.
+    """Parse each JSON-LD script tag, skipping any that contain broken JSON.
 
-    Malformed JSON-LD is common, so one broken block must not cost the others.
+    Handled one at a time because malformed JSON-LD is common and one bad block must
+    not cost us the good ones.
     """
     for script in soup.find_all("script"):
         script_type = (script.get("type") or "").strip().lower()
@@ -96,10 +101,10 @@ def _payloads(soup: BeautifulSoup) -> Iterator[Any]:
 
 
 def _find_products(payload: Any, depth: int = 0) -> list[dict[str, Any]]:
-    """Walk containers looking for product nodes.
+    """Search nested JSON-LD for product entries.
 
-    Descent is an allow-list, so isRelatedTo and friends are never traversed and
-    another product's facts cannot leak in. hasVariant is handled separately.
+    Only follows a fixed list of safe keys. Following something like "isRelatedTo"
+    would pull in a *different* product's price and report it as this one's.
     """
     if depth > 6:
         return []
@@ -129,7 +134,10 @@ def _find_products(payload: Any, depth: int = 0) -> list[dict[str, Any]]:
 
 
 def _types(node: dict[str, Any]) -> set[str]:
-    """@type may be a string or a list, and may be a full schema.org URL."""
+    """The schema.org types on a node, as lowercase names.
+
+    Handles @type being a single word, a list, or a full URL, all of which are legal.
+    """
     raw = node.get("@type") or node.get("type") or []
     values = raw if isinstance(raw, list) else [raw]
     return {
@@ -140,10 +148,12 @@ def _types(node: dict[str, Any]) -> set[str]:
 
 
 def _is_product(node: dict[str, Any]) -> bool:
+    """True if this JSON-LD node describes a product."""
     return bool(_types(node) & _PRODUCT_TYPES)
 
 
 def _map_product(node: dict[str, Any], bundle: CandidateBundle, suffix: str) -> None:
+    """Read one product node and add each field it publishes to the bundle."""
     source = f"{SOURCE}{suffix}"
 
     bundle.add(NAME, node.get("name"), f"{source} name", Tier.A)
@@ -168,7 +178,7 @@ def _map_product(node: dict[str, Any], bundle: CandidateBundle, suffix: str) -> 
 
 
 def _brand_name(brand: Any) -> str | None:
-    """brand is a Brand/Organization object or, loosely but commonly, a string."""
+    """The brand name, whether it was published as an object or just a string."""
     if isinstance(brand, str):
         return brand
     if isinstance(brand, dict):
@@ -183,7 +193,7 @@ def _brand_name(brand: Any) -> str | None:
 
 
 def _video_urls(value: Any) -> list[str]:
-    """A VideoObject's contentUrl or embedUrl, or a bare URL string."""
+    """Video URLs, from a video object's contentUrl/embedUrl or a plain string."""
     if isinstance(value, dict):
         for key in ("contentUrl", "embedUrl", "url"):
             if isinstance(value.get(key), str):
@@ -200,7 +210,10 @@ def _video_urls(value: Any) -> list[str]:
 
 
 def _offer_nodes(offers: Any) -> Iterator[dict[str, Any]]:
-    """Yield Offer/AggregateOffer dicts, flattening lists and nested offers."""
+    """All the offers on a product, flattening lists and offers nested inside offers.
+
+    An "offer" is schema.org's term for the pricing: amount, currency, availability.
+    """
     if isinstance(offers, dict):
         yield offers
         # AggregateOffer may enumerate its constituent Offers.
@@ -213,7 +226,7 @@ def _offer_nodes(offers: Any) -> Iterator[dict[str, Any]]:
 
 
 def _map_offers(offers: Any, bundle: CandidateBundle, source: str) -> bool:
-    """Map Offer/AggregateOffer pricing. Returns whether a price was found."""
+    """Record price, currency and availability from the offers. True if a price existed."""
     found = False
     for offer in _offer_nodes(offers):
         price = coerce_number(offer.get("price"))
@@ -247,9 +260,9 @@ def _map_offers(offers: Any, bundle: CandidateBundle, source: str) -> bool:
 def _price_from_variants(
     variants: list[Variant], bundle: CandidateBundle, source: str
 ) -> None:
-    """Fall back to the variant prices when the group itself is unpriced.
+    """Take a price from the variants when the product itself doesn't state one.
 
-    The lowest is used, matching the "from $X" convention a storefront shows.
+    Uses the cheapest, which matches the "from $X" wording shops normally show.
     """
     priced = [variant.price for variant in variants if variant.price is not None]
     if not priced:
@@ -274,10 +287,10 @@ def _price_from_variants(
 def _map_variants(
     node: dict[str, Any], bundle: CandidateBundle, source: str
 ) -> list[Variant]:
-    """Turn ProductGroup.hasVariant entries into Variant candidates.
+    """Turn the published variant list into Variant candidates.
 
-    Often the only complete account of the matrix, since pickers can be rendered
-    entirely client-side.
+    Frequently the only full account of which combinations exist, because the on-page
+    pickers can be built entirely by JavaScript and leave no trace in the HTML.
     """
     entries = node.get("hasVariant")
     if entries is None:
@@ -302,7 +315,7 @@ def _map_variants(
 
 
 def _declared_axes(node: dict[str, Any]) -> list[str]:
-    """ProductGroup.variesBy names the axes, as property names or as URLs."""
+    """The axis names the product says it varies by, such as size and colour."""
     raw = node.get("variesBy")
     if raw is None:
         return []
@@ -318,10 +331,12 @@ def _declared_axes(node: dict[str, Any]) -> list[str]:
 
 
 def _build_variant(entry: dict[str, Any], declared_axes: list[str]) -> Variant | None:
+    """Turn one published variant into a Variant, or None if it names no options."""
     attributes: list[VariantAttribute] = []
     seen_axes: set[str] = set()
 
     def add_axis(label: str, value: Any) -> None:
+        """Add one option to this variant, e.g. Size=Large."""
         text = coerce_text_list(value)
         if not text or label.casefold() in seen_axes:
             return
@@ -368,7 +383,7 @@ def _build_variant(entry: dict[str, Any], declared_axes: list[str]) -> Variant |
 
 
 def _availability(value: Any) -> bool | None:
-    """schema.org ItemAvailability enumeration; None when unstated."""
+    """Is this in stock? True, False, or None when the page doesn't say."""
     if not isinstance(value, str):
         return None
     token = local_name(value).casefold()

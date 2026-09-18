@@ -19,16 +19,16 @@ _PARSER = "lxml"
 
 
 def parse(html: str) -> BeautifulSoup:
-    """Build the shared document tree."""
+    """Parse HTML into a searchable tree. Every layer reads this same tree."""
     return BeautifulSoup(html, _PARSER)
 
 
 
 def canonical_url(soup: BeautifulSoup) -> str | None:
-    """The page's own statement of its address, or None.
+    """The page's own URL, taken from <link rel=canonical> or og:url. None if neither.
 
-    Load-bearing twice downstream: make_id() hashes it, and relative image URLs
-    resolve against it. Both sources can be absent, hence the nullable return.
+    Used for two things: the product id is a hash of it, and relative image URLs are
+    resolved against it. Some pages publish neither, hence the None.
     """
     link = soup.find("link", rel=lambda value: bool(value) and "canonical" in value)
     if link is not None:
@@ -108,10 +108,11 @@ _MAX_ATTR_CHARS = 300
 
 
 def semantic_html(soup: BeautifulSoup, max_chars: int | None = None) -> str:
-    """Serialise the page down to what carries product meaning.
+    """Rewrite the page as HTML with everything decorative removed.
 
-    Consumed by the prose call and the escalation pass, both billed per token.
-    Works on a copy, since the shared tree must not be mutated.
+    Drops styling, scripts, and presentation attributes, keeping structure and text.
+    Gets a page to roughly 8% of its original size, which is what makes it cheap to
+    send to a model. Works on a copy, because the shared tree must not be changed.
     """
     original_size = len(str(soup))
     working = copy.copy(soup)
@@ -172,6 +173,7 @@ def semantic_html(soup: BeautifulSoup, max_chars: int | None = None) -> str:
 
 
 def _strip_attrs(element: Tag) -> None:
+    """Delete every attribute on one tag except those that can carry meaning."""
     kept = {}
     for name, value in element.attrs.items():
         lowered = name.lower()
@@ -183,10 +185,10 @@ def _strip_attrs(element: Tag) -> None:
 
 
 def _shrink_value(value):
-    """Keep the fact that an attribute exists without paying for its payload.
+    """Cap one attribute's value so a huge one cannot dominate the output.
 
-    A page with a dozen inline base64 images would otherwise spend the whole
-    budget on pixels; no product fact needs a 4,000-character attribute.
+    An inline base64 image becomes "data:[elided]", and anything else is cut at 300
+    characters. The attribute still shows up; only its bulk is gone.
     """
     if not isinstance(value, str):
         return value
@@ -201,6 +203,7 @@ def _shrink_value(value):
 
 
 def _in_structured_script(string: NavigableString) -> bool:
+    """True if this text is inside a JSON-LD script, where whitespace matters."""
     parent = string.parent
     if parent is None or parent.name != "script":
         return False
@@ -208,11 +211,15 @@ def _in_structured_script(string: NavigableString) -> bool:
 
 
 def _has_kept_attrs(element: Tag) -> bool:
+    """True if any attribute survived the strip, so the tag still says something."""
     return bool(element.attrs)
 
 
 def _unwrap_bare_wrappers(root: BeautifulSoup) -> bool:
-    """Replace an attribute-less wrapper with its single child."""
+    """Remove <div>/<span> wrappers that hold one child and no useful attributes.
+
+    Returns True if anything changed, so the caller knows to look again.
+    """
     changed = False
     for element in root.find_all(list(_WRAPPER_TAGS)):
         if _has_kept_attrs(element):
@@ -225,7 +232,7 @@ def _unwrap_bare_wrappers(root: BeautifulSoup) -> bool:
 
 
 def _drop_empty_elements(root: BeautifulSoup) -> bool:
-    """Remove elements with no text, no attributes, and no meaningful children."""
+    """Delete tags left completely empty. Returns True if anything changed."""
     changed = False
     # Reversed document order approximates bottom-up, so a parent is considered
     # after the children that might have just been removed from it.
@@ -244,4 +251,5 @@ def _drop_empty_elements(root: BeautifulSoup) -> bool:
 
 
 def _is_blank(node) -> bool:
+    """True if this node is just whitespace between tags."""
     return isinstance(node, NavigableString) and not str(node).strip()

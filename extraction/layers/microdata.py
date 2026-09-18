@@ -82,7 +82,11 @@ _NUMERIC_FIELDS = frozenset({PRICE, COMPARE_AT_PRICE})
 
 
 def extract(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
-    """Add tier-A candidates from microdata properties."""
+    """Read the page's microdata attributes and add what it finds as tier A.
+
+    Microdata is the other way a site can state its product data: instead of a JSON
+    block, it tags ordinary HTML with attributes like itemprop="price".
+    """
     main_scope = _main_product_scope(soup)
     readings: list[_Reading] = []
 
@@ -98,7 +102,10 @@ def extract(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
 
 
 class _Reading:
-    """One resolved itemprop, kept with enough context to resolve conflicts."""
+    """One property we read off the page, with enough context to settle conflicts.
+
+    Remembers whether it sat inside the main product, since a page can mark up several.
+    """
 
     __slots__ = ("field", "value", "source", "in_product")
 
@@ -110,7 +117,7 @@ class _Reading:
 
 
 def _property_names(element: Tag) -> list[str]:
-    """itemprop is a space-separated token list per the spec."""
+    """The property names on one element. One element may declare several at once."""
     raw = element.get("itemprop") or ""
     if isinstance(raw, list):  # bs4 may pre-split multi-valued attributes
         tokens = raw
@@ -120,6 +127,7 @@ def _property_names(element: Tag) -> list[str]:
 
 
 def _scope_type(element: Tag | None) -> set[str]:
+    """The schema.org types this element claims to describe, as lowercase names."""
     if element is None:
         return set()
     raw = element.get("itemtype") or ""
@@ -132,14 +140,15 @@ def _scope_type(element: Tag | None) -> set[str]:
 
 
 def _is_product_scope(element: Tag | None) -> bool:
+    """True if this element is marked up as a product."""
     return bool(_scope_type(element) & _PRODUCT_TYPES)
 
 
 def _main_product_scope(soup: BeautifulSoup) -> Tag | None:
-    """The richest Product itemscope on the page.
+    """Find which marked-up product on the page is the one actually being sold.
 
-    A related-items rail declares Products too; the one being sold has the most
-    properties, which is structural rather than a guess about layout.
+    A "you may also like" row marks up products too. The real one is whichever has the
+    most properties, which is a structural test rather than a guess about layout.
     """
     scopes = [
         element
@@ -152,7 +161,7 @@ def _main_product_scope(soup: BeautifulSoup) -> Tag | None:
 
 
 def _read(element: Tag, prop: str, main_scope: Tag | None) -> _Reading | None:
-    """Resolve one property against the item that owns it."""
+    """Read one property and work out which product it belongs to."""
     key = local_name(prop).casefold()
 
     # The nearest enclosing itemscope owns this property; an element with both
@@ -200,8 +209,10 @@ def _read(element: Tag, prop: str, main_scope: Tag | None) -> _Reading | None:
 
 
 def _value_of(element: Tag) -> str | None:
-    """Value resolution per the microdata spec: it depends on the element.
+    """Get one property's value. Where it lives depends on the tag.
 
+    The spec puts it in different places: `content` on <meta>, `href` on <a>, `src` on
+    <img>, `datetime` on <time>, and the visible text on anything else.
     https://html.spec.whatwg.org/multipage/microdata.html#values
     """
     tag = element.name.lower()
@@ -228,6 +239,7 @@ def _value_of(element: Tag) -> str | None:
 
 
 def _attr(element: Tag, name: str) -> str | None:
+    """One attribute's value, tidied, or None if absent or blank."""
     value = element.get(name)
     if isinstance(value, list):
         value = " ".join(value)
@@ -238,10 +250,10 @@ def _attr(element: Tag, name: str) -> str | None:
 
 
 def _emit(readings: list[_Reading], bundle: CandidateBundle) -> None:
-    """Collapse readings per field and hand them to the bundle.
+    """Send the readings to the bundle, one value per field.
 
-    List fields keep everything; scalar fields prefer a property inside the main
-    product item, else document order, and record that a conflict existed.
+    Fields holding a list keep every reading. Single-value fields prefer one from
+    inside the main product, then whichever came first, and note that others existed.
     """
     by_field: dict[str, list[_Reading]] = {}
     for reading in readings:

@@ -52,10 +52,10 @@ def reset_usage_total() -> None:
 
 
 def cost_of(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Price one call. An unknown model costs zero rather than aborting a batch.
+    """Work out what one model call cost, in dollars.
 
-    A test asserts every id in config.py has a MODEL_PRICES entry, so an unpriced
-    id fails loudly there instead of silently here.
+    A model we have no price for costs zero rather than crashing a whole batch. A test
+    checks every model in config.py is priced, so a missing one fails there instead.
     """
     prices = ai.MODEL_PRICES.get(model, {"input": 0.0, "output": 0.0})
     return (input_tokens / 1_000_000) * prices["input"] + (
@@ -86,6 +86,7 @@ class _RecordingClient:
         self.records: list[UsageRecord] = []
 
     def _add(self, record: UsageRecord) -> None:
+        """Record one call's usage, both on this client and in the run-wide total."""
         self.records.append(record)
         USAGE_TOTAL["calls"] += 1
         USAGE_TOTAL["input_tokens"] += record.input_tokens
@@ -94,7 +95,7 @@ class _RecordingClient:
         USAGE_TOTAL["cost_usd"] += record.cost_usd
 
     def cost_since(self, index: int) -> float:
-        """Cost of the calls made after `index`, i.e. one product's extraction."""
+        """Total cost of every call made since `index`, which is one product's worth."""
         return sum(record.cost_usd for record in self.records[index:])
 
 
@@ -108,6 +109,7 @@ class OpenRouterClient(_RecordingClient):
         text_format: type[T],
         **kwargs: Any,
     ) -> T | None:
+        """Make one real API call, log its usage, and return the parsed answer."""
         # Their cached client keeps key handling and base_url in one place;
         # constructing our own would duplicate their env-var validation.
         client = ai._get_client()
@@ -125,6 +127,7 @@ class OpenRouterClient(_RecordingClient):
         return response.output_parsed
 
     def _record(self, response: Any) -> None:
+        """Pull the token counts off a response and store them with the cost."""
         usage = getattr(response, "usage", None)
         if usage is None:
             logger.warning("No usage data on response; cost will be understated")
@@ -169,6 +172,7 @@ class FakeLLMClient(_RecordingClient):
         text_format: type[T],
         **kwargs: Any,
     ) -> T | None:
+        """Return the next queued answer, recording what was asked. No network call."""
         self.calls.append(
             {
                 "model": model,

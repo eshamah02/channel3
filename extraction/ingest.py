@@ -35,7 +35,7 @@ ClientFactory = Callable[[], LLMClient]
 
 @dataclasses.dataclass
 class IngestResult:
-    """What one run did."""
+    """A record of what one run did: what worked, what was skipped, what failed."""
 
     extracted: list[ExtractedProduct] = dataclasses.field(default_factory=list)
     skipped: list[str] = dataclasses.field(default_factory=list)
@@ -54,9 +54,10 @@ class IngestResult:
 
 
 def expand(paths: Iterable[str] | None) -> list[str]:
-    """Resolve arguments to input files, defaulting to the sample directory.
+    """Turn command-line arguments into a list of files, defaulting to data/*.html.
 
-    Globs are expanded here rather than by the shell, so a quoted pattern works too.
+    Patterns like "*.html" are expanded here rather than by the shell, so a quoted one
+    still works. Duplicates are removed and order is kept.
     """
     patterns = list(paths or [])
     if not patterns:
@@ -80,10 +81,10 @@ def expand(paths: Iterable[str] | None) -> list[str]:
 
 
 def load_index(out_dir: Path) -> dict[str, str]:
-    """Map content_hash -> product id for everything already extracted.
+    """Fingerprints of everything already extracted, so unchanged files can be skipped.
 
-    Read once per run. A corrupt envelope is ignored rather than fatal: re-extracting
-    one page is recoverable, refusing to start is not.
+    Read once per run. A corrupt file is ignored rather than fatal, because
+    re-extracting one page is recoverable and refusing to start is not.
     """
     index: dict[str, str] = {}
     if not out_dir.is_dir():
@@ -100,10 +101,10 @@ def load_index(out_dir: Path) -> dict[str, str]:
 
 
 def write_envelope(envelope: ExtractedProduct, out_dir: Path) -> Path:
-    """Write one envelope atomically.
+    """Save one product as JSON, all at once so it can never be half-written.
 
-    Written to a temporary name and moved into place, so an interrupted run cannot
-    leave a truncated file for the API to trip over.
+    Writes to a temporary name and then renames it, so a run killed midway leaves
+    complete files rather than truncated ones the API would choke on.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{envelope.id}.json"
@@ -130,13 +131,18 @@ async def ingest(
     client_factory: ClientFactory = llm.OpenRouterClient,
     category_resolver=DEFAULT_RESOLVER,
 ) -> IngestResult:
-    """Extract every input that has changed, concurrently, and write the results."""
+    """Extract every file that has changed and save the results. The main entry point.
+
+    Runs several pages at once since the time goes on waiting for the model. One page
+    failing is recorded and does not stop the others.
+    """
     result = IngestResult()
     index = {} if force else load_index(out_dir)
     limit = asyncio.Semaphore(max(1, concurrency))
     claimed: dict[str, str] = {}  # product id -> the input file that produced it
 
     async def one(path: str) -> None:
+        """Handle a single file: skip it, extract and save it, or record the failure."""
         try:
             html = Path(path).read_text(encoding="utf-8", errors="replace")
         except OSError as exc:

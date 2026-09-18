@@ -58,7 +58,12 @@ _BRAND_TRAP = "og:site_name"
 
 
 def extract(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
-    """Add tier-B candidates from head metadata."""
+    """Read the <head> tags and add what they say as tier B.
+
+    These are the OpenGraph and Twitter tags that make link previews on social media,
+    so they hold the right facts wrapped in marketing: og:title is regularly
+    "Name | Free Shipping | Store", which contains the name without being it.
+    """
     for element in soup.find_all("meta"):
         key = element.get("property") or element.get("name") or element.get("itemprop")
         if isinstance(key, list):

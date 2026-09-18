@@ -16,10 +16,10 @@ from pydantic import BaseModel
 
 
 class Tier(str, Enum):
-    """Provenance ranking; a lower letter is closer to what the site declared.
+    """How much the page vouches for a value. A is the best, E is the worst.
 
-    Ranked per field, not globally: og:title is a good name source and
-    og:site_name is a bad brand source, though both are OpenGraph.
+    Ranked per field rather than overall: og:title is a good place to find a name
+    and og:site_name is a bad place to find a brand, though both are OpenGraph.
     """
 
     # Site explicitly published this as machine-readable product data.
@@ -71,7 +71,7 @@ LIST_FIELDS: frozenset[str] = frozenset({KEY_FEATURES, IMAGE_URLS, COLORS, VARIA
 
 @dataclasses.dataclass(frozen=True)
 class Candidate:
-    """One reading of one field, with its provenance.
+    """One value we found for one field, and where we found it.
 
     A dataclass rather than a pydantic model: internal, never crosses the API
     boundary, and the brief asks that pydantic models stay in models.py.
@@ -91,16 +91,16 @@ class Candidate:
 
 
 class CandidateBundle:
-    """Everything every layer found, in the order it was found."""
+    """Every value all the layers found, before anything decides which is right."""
 
     def __init__(self) -> None:
         self._candidates: list[Candidate] = []
 
     def add(self, field: str, value: Any, source: str, tier: Tier) -> Candidate | None:
-        """Record a candidate, ignoring empty values.
+        """Store one found value. Anything blank or empty is dropped instead.
 
-        Filtering here means a layer can hand over whatever a standard gave it
-        without first checking for absent, blank or empty.
+        Dropping them here means a layer can pass on whatever the page gave it
+        without checking for missing, blank or empty first.
         """
         cleaned = _clean(value)
         if cleaned is None:
@@ -117,14 +117,14 @@ class CandidateBundle:
         return iter(self._candidates)
 
     def fields(self) -> list[str]:
-        """Fields that have at least one candidate, in first-seen order."""
+        """Names of the fields we found at least one value for."""
         seen: dict[str, None] = {}
         for candidate in self._candidates:
             seen.setdefault(candidate.field, None)
         return list(seen)
 
     def for_field(self, field: str) -> list[Candidate]:
-        """Candidates for one field, best tier first, insertion order within a tier."""
+        """Every value found for one field, most trustworthy source first."""
         indexed = [
             (candidate.tier.value, index, candidate)
             for index, candidate in enumerate(self._candidates)
@@ -134,15 +134,15 @@ class CandidateBundle:
         return [row[2] for row in indexed]
 
     def best(self, field: str) -> Candidate | None:
-        """Single strongest candidate, or None. Ties broken by first seen."""
+        """The one best-sourced value for a field, or None if we found none."""
         candidates = self.for_field(field)
         return candidates[0] if candidates else None
 
     def all_at_best_tier(self, field: str) -> list[Candidate]:
-        """Every candidate sharing the strongest tier present for this field.
+        """Every value for a field that came from the best source available.
 
-        Needed for list-valued fields, where each entry arrives as its own
-        candidate: a variant matrix is many candidates, not one.
+        Needed for fields that hold a list, where each entry arrives as its own
+        candidate: a set of variants is many candidates, not one.
         """
         candidates = self.for_field(field)
         if not candidates:
@@ -153,10 +153,11 @@ class CandidateBundle:
     def to_prompt_dict(
         self, max_chars: int = 1200, max_items: int = 40
     ) -> dict[str, list[dict[str, Any]]]:
-        """Compact, JSON-safe view for the arbitration prompt.
+        """The candidates as JSON, grouped by field, ready to send to the model.
 
-        Identical values are collapsed with their sources merged. Truncation
-        applies to this view only; the bundle keeps the full value for grounding.
+        Repeated values are merged into one entry listing every source that found
+        it, so agreement between sources is visible. Long values are shortened and
+        marked; the bundle keeps the full version for later checking.
         """
         out: dict[str, list[dict[str, Any]]] = {}
         for field in self.fields():
@@ -189,7 +190,7 @@ class CandidateBundle:
 
 
 def _clean(value: Any) -> Any | None:
-    """Normalise a candidate value, returning None when it carries nothing."""
+    """Tidy one value, or return None if it turns out to be empty."""
     if value is None:
         return None
 
@@ -210,7 +211,10 @@ def _clean(value: Any) -> Any | None:
 
 
 def _jsonable(value: Any) -> Any:
-    """Convert pydantic models and nested containers to plain JSON types."""
+    """Convert a value to plain types json.dumps can handle.
+
+    Variant candidates hold pydantic models, which would otherwise not serialise.
+    """
     if isinstance(value, BaseModel):
         return value.model_dump(exclude_none=True)
     if isinstance(value, (list, tuple)):
@@ -221,6 +225,10 @@ def _jsonable(value: Any) -> Any:
 
 
 def _truncate(value: Any, max_chars: int, max_items: int) -> tuple[Any, bool]:
+    """Shorten a long string or list. Returns the value and whether it was cut.
+
+    The caller uses that flag to tell the model it is seeing only part of a value.
+    """
     if isinstance(value, str) and len(value) > max_chars:
         return value[:max_chars].rstrip() + "\u2026", True
     if isinstance(value, list) and len(value) > max_items:
@@ -229,12 +237,20 @@ def _truncate(value: Any, max_chars: int, max_items: int) -> tuple[Any, bool]:
 
 
 def collapse(value: str) -> str:
-    """Collapse the whitespace runs that pretty-printed markup leaves in text."""
+    """Squash runs of spaces and newlines into single spaces, and trim the ends.
+
+    Indented HTML leaves these inside text, which would make the same value read
+    as two different ones.
+    """
     return re.sub(r"\s+", " ", value).strip()
 
 
 def local_name(value: str) -> str:
-    """Last segment of a schema.org term, which may be written as a full URL."""
+    """Reduce a schema.org term to its last word: ".../Product/" -> "Product".
+
+    The spec allows the same type to be written as a bare word or a full URL, so
+    this makes all the spellings comparable.
+    """
     return value.rstrip("/").rsplit("/", 1)[-1].rsplit("#", 1)[-1].strip()
 
 
@@ -242,11 +258,12 @@ _NUMBER_PATTERN = re.compile(r"-?\d[\d.,\u00a0\u202f ]*\d|-?\d")
 
 
 def coerce_number(value: Any) -> float | None:
-    """Parse a price out of the formats publishers use.
+    """Read a number out of a price string like "$1,299.00", or None if there isn't one.
 
-    When both separators are present the rightmost is the decimal point, which
-    holds in every grouping locale. A lone comma before exactly two digits is a
-    decimal separator, so "29,99" is 29.99 and "1,299" is 1299.
+    Handles both separator conventions without needing to know the locale. When a
+    string has both, the rightmost one is the decimal point. A lone comma is a
+    decimal point only if exactly two digits follow, so "29,99" is 29.99 while
+    "1,299" is 1299.
     """
     if value is None or isinstance(value, bool):
         return None
@@ -280,7 +297,11 @@ def coerce_number(value: Any) -> float | None:
 
 
 def coerce_text_list(value: Any) -> list[str]:
-    """Flatten a schema.org value that may be a scalar, a list, or nested."""
+    """Turn a schema.org value into a plain list of strings.
+
+    The spec lets one field be a string, a number, an object, or a list of any of
+    those, and publishers use all of them. An object stands in for its URL or name.
+    """
     if value is None:
         return []
     if isinstance(value, str):

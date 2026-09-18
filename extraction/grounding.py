@@ -24,10 +24,10 @@ _MIN_SEGMENT_LENGTH = 6
 
 
 def verify_urls(urls: list[str], raw_html: str) -> list[str]:
-    """Warn about URLs with no anchor in the source.
+    """Check each image URL really came from the page. Returns a warning per failure.
 
-    Matched on the longest path segment rather than the whole URL, since
-    normalisation deliberately rewrote these.
+    Compares the longest part of the URL path rather than the whole URL, because
+    normalisation deliberately rewrote these to ask for full-resolution versions.
     """
     warnings: list[str] = []
     decoded = unquote(raw_html)
@@ -45,16 +45,21 @@ def verify_urls(urls: list[str], raw_html: str) -> list[str]:
 
 
 def _longest_segment(url: str) -> str | None:
+    """The longest chunk between slashes in a URL path, if any is long enough.
+
+    Short chunks are skipped because finding "is" in a page proves nothing.
+    """
     path = urlparse(url).path
     segments = [segment for segment in path.split("/") if len(segment) >= _MIN_SEGMENT_LENGTH]
     return max(segments, key=len) if segments else None
 
 
 def verify_text(value: str, raw_html: str, *, label: str) -> list[str]:
-    """Warn when a short text value has no anchor in the source.
+    """Check a short text value appears somewhere in the page. Returns any warning.
 
-    Only for values the model should have selected rather than written; checking
-    synthesised prose would flag correct behaviour.
+    Only for values the model was supposed to pick, like a name or brand. Running it
+    on the description would flag the model for doing its job, since we asked it to
+    write that from scratch.
     """
     cleaned = collapse(value)
     if not cleaned or len(cleaned) < 3:

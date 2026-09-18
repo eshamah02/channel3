@@ -20,10 +20,10 @@ _COLOR_AXIS_LABELS = frozenset({"color", "colour"})
 
 
 def _dedupe(values: list[str]) -> list[str]:
-    """Drop repeats while keeping the first occurrence's position and casing.
+    """Remove duplicates from a list of strings, keeping the original order.
 
-    Matched case-insensitively on stripped text so "Black" and "black " from two
-    different variants collapse, but the first spelling seen is what survives.
+    Compares case-insensitively so "Black" and "black " count as the same, and keeps
+    whichever spelling appeared first.
     """
     seen: set[str] = set()
     out: list[str] = []
@@ -40,11 +40,12 @@ def _dedupe(values: list[str]) -> list[str]:
 
 
 def derive_options(variants: list[Variant]) -> list[VariantOption]:
-    """Group variant attribute values into per-axis option lists.
+    """List the choices a shopper can make, worked out from the variants.
 
-    First-seen order is preserved because pages list sizes semantically (S, M, L)
-    and sorting would destroy that. Values are unioned per axis independently, so a
-    sparse matrix still advertises every value that exists.
+    Given variants like Black/S, Black/M and White/S, returns Color=[Black, White]
+    and Size=[S, M]. Page order is kept, because pages list sizes small to large and
+    sorting alphabetically would ruin that. Each axis is collected independently, so
+    a patchy set of variants still advertises every value that exists somewhere.
     """
     grouped: dict[str, list[str]] = {}
     # dict preserves insertion order, so axis order follows first appearance.
@@ -62,10 +63,11 @@ def derive_options(variants: list[Variant]) -> list[VariantOption]:
 
 
 def derive_colors(variants: list[Variant], llm_colors: list[str] | None = None) -> list[str]:
-    """Resolve Product.colors so it can never contradict Product.variants.
+    """The product's colours, preferring the model's list and falling back to variants.
 
-    The model's list wins because pages name colours in prose that never appear as an
-    axis value; the axis is consulted only when the model gave nothing.
+    The model wins because pages mention colours in prose that never appear as a
+    picker option. Falling back to the colour axis means this can never disagree with
+    the variants.
     """
     if llm_colors:
         return _dedupe(llm_colors)
@@ -78,20 +80,21 @@ def derive_colors(variants: list[Variant], llm_colors: list[str] | None = None) 
 
 
 def make_id(canonical_url: str) -> str:
-    """Stable content-addressed id: truncated sha256 of the canonical URL.
+    """The product's id: the first 16 characters of the URL's sha256 hash.
 
-    Hashing the URL rather than the body means an edited page keeps its id, so
-    caches and downstream references survive a re-crawl.
+    Hashing the URL rather than the page contents means an edited page keeps the same
+    id, so links and caches still work after a re-crawl.
     """
     normalized = canonical_url.strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
 def make_slug(name: str) -> str:
-    """Human-readable URL fragment. Cosmetic; ids do the routing.
+    """Turn a product name into a URL-friendly string: "Café Chair" -> "cafe-chair".
 
-    Accents fold to base letters via NFKD, but CJK and Cyrillic are kept rather than
-    deleted, since dropping them would collapse every such name to the same slug.
+    Decorative only; the id is what actually identifies a product. Accented letters
+    fold to their base letter, but Chinese and Cyrillic characters are kept rather
+    than stripped, since removing them would turn every such name into the same slug.
     """
     # NFKD splits "é" into "e" + combining accent; Mn is the combining-mark
     # category, so filtering it leaves the base letter behind.
@@ -111,10 +114,9 @@ def make_slug(name: str) -> str:
 
 
 def content_hash(raw_html: str) -> str:
-    """sha256 of the raw input, the cache key for "has this page changed?".
+    """Fingerprint of the raw HTML, used to answer "has this page changed?".
 
-    Full digest rather than truncated: this one is compared for equality to
-    decide whether to spend tokens, so there is no reason to trade away
-    collision resistance for brevity.
+    The full hash rather than a shortened one, because a match here decides whether
+    to skip the page and spend nothing, so a collision would mean stale data.
     """
     return hashlib.sha256(raw_html.encode("utf-8", errors="replace")).hexdigest()

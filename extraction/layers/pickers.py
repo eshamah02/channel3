@@ -27,7 +27,11 @@ SOURCE = "text"
 
 
 def extract(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
-    """Add tier-D variant candidates from the page's selection controls."""
+    """Read the size and colour pickers on the page and add them as tier D.
+
+    When a shop builds its variant data with JavaScript, the dropdowns and swatches a
+    shopper clicks are the only remaining evidence of what can be bought.
+    """
     _map_rendered_variants(soup, bundle)
 
 
@@ -77,14 +81,13 @@ _TRAILING_PRICE_RE = re.compile(
 
 
 def _map_rendered_variants(soup: BeautifulSoup, bundle: CandidateBundle) -> None:
-    """Recover variant axes from the controls a shopper uses to choose.
+    """Work out the axes and values from the controls a shopper clicks to choose.
 
-    Groups are found through WAI-ARIA roles, the select element and fieldsets of
-    radio inputs, and named through the accessible-name computation rather than
-    class names or DOM position.
+    Groups are found via ARIA roles, <select> and radio-button fieldsets, and named the
+    same way a screen reader would name them, never by CSS class or position.
 
-    A picker reveals the axes and their values, not which combinations exist, so
-    each value becomes a single-axis Variant and no combination is invented.
+    A picker tells you the sizes exist, not which colour/size pairs can be bought, so
+    each value becomes its own single-axis variant and nothing is invented.
     """
     seen_axes: dict[str, list[str]] = {}
 
@@ -107,11 +110,11 @@ def _map_rendered_variants(soup: BeautifulSoup, bundle: CandidateBundle) -> None
 
 
 def _is_variant_axis(label: str, values: list[str]) -> bool:
-    """Reject grouped controls that are not product variants.
+    """Is this group of choices actually a product option, or something else?
 
-    Quantity steppers, store locators, address forms and marketing surveys all look
-    structurally identical to a picker, so each test keys off generic UI vocabulary
-    or the shape of the values.
+    Quantity dropdowns, store pickers, country lists and newsletter surveys are built
+    from identical markup, so each test looks at generic interface wording or the shape
+    of the values rather than at any site's classes.
     """
     if label.rstrip().endswith("?"):
         # A question is a survey prompt; product axes are noun phrases.
@@ -143,10 +146,9 @@ def _is_variant_axis(label: str, values: list[str]) -> bool:
 
 
 def _is_offscreen(group: Tag) -> bool:
-    """Modals and hidden panels are not the product's pickers.
+    """True if this picker is inside a hidden panel or popup, so it isn't the real one.
 
-    aria-hidden and the dialog role are how a page says "not currently part of the
-    document".
+    `aria-hidden` and the dialog role are how a page says "not currently on screen".
     """
     for parent in [group, *group.parents]:
         if parent.get("aria-hidden") == "true":
@@ -157,6 +159,7 @@ def _is_offscreen(group: Tag) -> bool:
 
 
 def _picker_groups(soup: BeautifulSoup) -> Iterator[tuple[str, list[str]]]:
+    """Yield each real product picker on the page as (axis name, values)."""
     for group, options in _candidate_groups(soup):
         if _is_offscreen(group):
             continue
@@ -166,7 +169,11 @@ def _picker_groups(soup: BeautifulSoup) -> Iterator[tuple[str, list[str]]]:
 
 
 def _candidate_groups(soup: BeautifulSoup) -> Iterator[tuple[Tag, list[Tag]]]:
-    """Grouped selection controls, located through ARIA roles and HTML semantics."""
+    """Find every group of choices on the page, before filtering out the irrelevant ones.
+
+    Looks for the three standard ways to build one: a <select>, an ARIA radiogroup or
+    listbox, and a <fieldset> of radio buttons.
+    """
     # WAI-ARIA composite widgets.
     for role, option_role in (("radiogroup", "radio"), ("listbox", "option")):
         for group in soup.find_all(attrs={"role": role}):
@@ -199,6 +206,7 @@ def _candidate_groups(soup: BeautifulSoup) -> Iterator[tuple[Tag, list[Tag]]]:
 def _describe_group(
     group: Tag, options: list[Tag], soup: BeautifulSoup
 ) -> tuple[str, list[str]] | None:
+    """Work out one picker's axis name and its list of values."""
     if len(options) < 1:
         return None
 
@@ -251,7 +259,7 @@ def _describe_group(
 
 
 def _option_value(option: Tag) -> str | None:
-    """The shortest accessible rendering of the choice itself."""
+    """The value one option stands for, e.g. "Large" rather than "Size Option: Large"."""
     for getter in (
         lambda: option.get("title"),
         lambda: option.get("aria-label"),
@@ -266,7 +274,11 @@ def _option_value(option: Tag) -> str | None:
 
 
 def _option_description(option: Tag) -> str | None:
-    """The most descriptive accessible name, which often carries the axis too."""
+    """The fullest label on an option, which often names the axis as well as the value.
+
+    Useful because "Size Option: Large" tells you the axis is Size even when the group
+    itself carries no label.
+    """
     for getter in (
         lambda: option.get("aria-label"),
         lambda: (option.find("img") or {}).get("alt") if option.find("img") else None,
@@ -280,7 +292,11 @@ def _option_description(option: Tag) -> str | None:
 
 
 def _group_label(group: Tag, soup: BeautifulSoup) -> str | None:
-    """Accessible name of the group, per the ARIA/HTML labelling mechanisms."""
+    """The name of a whole picker, e.g. "Size", following the standard label rules.
+
+    Checks aria-label, aria-labelledby, a <legend>, and an associated <label>, which is
+    how screen readers find it too. Nothing here looks at CSS classes.
+    """
     aria_label = group.get("aria-label")
     if isinstance(aria_label, str) and aria_label.strip():
         return aria_label.strip()
@@ -317,10 +333,10 @@ def _group_label(group: Tag, soup: BeautifulSoup) -> str | None:
 
 
 def _common_prefix(descriptions: list[str]) -> str:
-    """The leading text every option repeats, up to the last separator.
+    """The text every option starts with, which is usually the axis name.
 
-    Accessible names on a picker are conventionally "<axis>: <value>", so what the
-    options share is the axis. A convention in label text, not a standard.
+    Options are commonly labelled "Size: Small", "Size: Medium", so what they all share
+    is "Size". This is a widespread habit in label text, not a rule from any standard.
     """
     if not descriptions:
         return ""
@@ -353,18 +369,20 @@ def _common_prefix(descriptions: list[str]) -> str:
 
 
 def _axis_from_prefix(prefix: str) -> str | None:
+    """Read an axis name out of the text the options share, if it looks like one."""
     cleaned = prefix.strip().strip(":,-\u2013 ").strip()
     return cleaned or None
 
 
 def _strip_prefix(value: str, prefix: str) -> str:
+    """Remove the shared prefix from a value: "Size: Large" -> "Large"."""
     if prefix and value.casefold().startswith(prefix.casefold()) and len(value) > len(prefix):
         return value[len(prefix) :].strip(" :,-\u2013")
     return value
 
 
 def _strip_leading_noise(value: str) -> str:
-    """Remove control vocabulary left at the front of a value."""
+    """Strip leftover interface words from the start of a value: "Select Blue" -> "Blue"."""
     result = value
     for _ in range(3):
         words = re.split(r"\s+", result, maxsplit=1)
@@ -375,7 +393,7 @@ def _strip_leading_noise(value: str) -> str:
 
 
 def _clean_label(label: str) -> str | None:
-    """Reduce an accessible label to an axis name."""
+    """Tidy a label down to a bare axis name: "Choose a Size:" -> "Size"."""
     cleaned = label.strip().strip(":,-\u2013 ").strip()
     words = [word for word in re.split(r"\s+", cleaned) if word]
     kept = [word for word in words if word.casefold().strip(":,") not in _LABEL_NOISE]
