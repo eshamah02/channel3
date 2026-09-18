@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+  Hand-written. Exercises the container shapes that hide a Product:
+  a top-level array, an @graph, and a WebPage whose mainEntity is the Product.
+  Also: brand as a plain string, image as a single string, and an AggregateOffer
+  with lowPrice/highPrice (the schema.org way to express a discounted range).
+  The isRelatedTo Product must NOT be picked up.
+-->
+<html lang="en">
+<head>
+  <title>Fixture Graph</title>
+  <script type="application/ld+json">
+  [
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        { "@type": "BreadcrumbList", "itemListElement": [] },
+        {
+          "@type": "WebPage",
+          "url": "https://shop.test/graph-widget",
+          "mainEntity": {
+            "@type": "Product",
+            "name": "Graph Widget",
+            "description": "Found via @graph and mainEntity.",
+            "brand": "Graph Brand",
+            "image": "https://cdn.test/graph.jpg",
+            "isRelatedTo": {
+              "@type": "Product",
+              "name": "Unrelated Accessory",
+              "offers": { "@type": "Offer", "price": "9.99", "priceCurrency": "EUR" }
+            },
+            "offers": {
+              "@type": "AggregateOffer",
+              "lowPrice": "80.00",
+              "highPrice": "120.00",
+              "priceCurrency": "GBP"
+            }
+          }
+        }
+      ]
+    }
+  ]
+  </script>
+</head>
+<body><h1>Graph Widget</h1></body>
+</html>

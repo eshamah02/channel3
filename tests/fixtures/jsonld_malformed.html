@@ -1,0 +1,29 @@
+<!doctype html>
+<!--
+  Hand-written. Three ld+json blocks where the middle one is invalid JSON
+  (trailing comma). Malformed JSON-LD is common in the wild, so a broken block
+  must be skipped without preventing the surrounding blocks from being read.
+-->
+<html lang="en">
+<head>
+  <title>Fixture Malformed</title>
+
+  <script type="application/ld+json">
+  { "@context": "https://schema.org", "@type": "Organization", "name": "Fixture Org" }
+  </script>
+
+  <script type="application/ld+json">
+  { "@context": "https://schema.org", "@type": "Product", "name": "Broken", }
+  </script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    "name": "Survivor Widget",
+    "offers": { "@type": "Offer", "price": "12.34", "priceCurrency": "CAD" }
+  }
+  </script>
+</head>
+<body><h1>Survivor Widget</h1></body>
+</html>

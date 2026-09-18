@@ -1,12 +1,7 @@
 """Pure derivations over extracted data. No I/O, no model calls, no HTML.
 
-Two jobs. First, turn a flat list of variants into the selectable axes a
-storefront renders, so the axes can never disagree with the variants they came
-from. Second, mint the identity fields on the envelope.
-
-Everything here is a deterministic function of its arguments, which is why the
-whole variant design can be proven by tests before any HTML is parsed or any
-token is spent.
+Turns a flat variant list into the selectable axes a storefront renders, so the two
+can never disagree, and mints the envelope's identity fields.
 """
 
 import hashlib
@@ -19,11 +14,8 @@ from models import Variant, VariantOption
 # only a floor on readability, not a uniqueness guarantee.
 _MAX_SLUG_LENGTH = 80
 
-# Labels that mean "this axis is the colour axis". A two-word English/en-GB
-# check, used only as a fallback when the model returned no colours. It reads a
-# human-facing label, not a site's markup, so it carries no site-specific
-# knowledge -- but it is a language assumption, and on a non-English page the
-# fallback simply yields nothing rather than guessing wrong.
+# A language assumption, not a site-specific one: it reads a human-facing label, and
+# on a non-English page the fallback yields nothing rather than guessing wrong.
 _COLOR_AXIS_LABELS = frozenset({"color", "colour"})
 
 
@@ -50,15 +42,9 @@ def _dedupe(values: list[str]) -> list[str]:
 def derive_options(variants: list[Variant]) -> list[VariantOption]:
     """Group variant attribute values into per-axis option lists.
 
-    First-seen order is preserved deliberately, for both axes and values. Pages
-    list sizes semantically -- S, M, L or US 6 through 13 -- and that ordering
-    is not recoverable by sorting, so inheriting the page's order gives correct
-    pickers for free while sorting would actively destroy the information.
-
-    Sparse matrices are handled by construction: the union of values per axis is
-    collected independently, so Black/S, Black/M, White/S yields Color=[Black,
-    White] and Size=[S, M] even though White/M is never offered. Task 12 renders
-    that gap as a disabled option rather than hiding it.
+    First-seen order is preserved because pages list sizes semantically (S, M, L)
+    and sorting would destroy that. Values are unioned per axis independently, so a
+    sparse matrix still advertises every value that exists.
     """
     grouped: dict[str, list[str]] = {}
     # dict preserves insertion order, so axis order follows first appearance.
@@ -78,11 +64,8 @@ def derive_options(variants: list[Variant]) -> list[VariantOption]:
 def derive_colors(variants: list[Variant], llm_colors: list[str] | None = None) -> list[str]:
     """Resolve Product.colors so it can never contradict Product.variants.
 
-    The model's list wins when it produced one, because a page often names
-    colours in prose ("Heather Grey") that never appear as a variant axis. The
-    axis is only consulted when the model gave nothing, which means the two
-    fields are always either the same claim or one is empty -- never a conflict
-    a client would have to reconcile.
+    The model's list wins because pages name colours in prose that never appear as an
+    axis value; the axis is consulted only when the model gave nothing.
     """
     if llm_colors:
         return _dedupe(llm_colors)
@@ -97,10 +80,8 @@ def derive_colors(variants: list[Variant], llm_colors: list[str] | None = None) 
 def make_id(canonical_url: str) -> str:
     """Stable content-addressed id: truncated sha256 of the canonical URL.
 
-    Hashing the URL rather than the page body means re-crawling an edited page
-    produces the same id, so caches and any downstream references survive. 16
-    hex chars is 64 bits -- ample for a catalogue, and short enough to read in a
-    filename or a URL path.
+    Hashing the URL rather than the body means an edited page keeps its id, so
+    caches and downstream references survive a re-crawl.
     """
     normalized = canonical_url.strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
@@ -109,10 +90,8 @@ def make_id(canonical_url: str) -> str:
 def make_slug(name: str) -> str:
     """Human-readable URL fragment. Cosmetic; ids do the routing.
 
-    Accents are folded to their base letters via NFKD so "Café" becomes "cafe",
-    while scripts without an ASCII decomposition (CJK, Cyrillic) are kept as-is
-    rather than silently deleted -- percent-encoding handles them, and dropping
-    them would turn every such name into the same empty slug.
+    Accents fold to base letters via NFKD, but CJK and Cyrillic are kept rather than
+    deleted, since dropping them would collapse every such name to the same slug.
     """
     # NFKD splits "é" into "e" + combining accent; Mn is the combining-mark
     # category, so filtering it leaves the base letter behind.

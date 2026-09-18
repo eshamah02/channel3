@@ -1,0 +1,77 @@
+<!doctype html>
+<!--
+  Hand-written from WAI-ARIA and the HTML forms spec. Four picker patterns that
+  should be read as variant axes:
+    1. role=radiogroup + role=radio, axis recoverable only from the shared prefix
+       of the options' accessible names ("Size Option: Small")
+    2. role=radiogroup where the swatch label lives on a nested img alt and
+       carries a trailing price
+    3. role=group + aria-label + aria-pressed toggle buttons
+    4. fieldset + legend + radio inputs
+
+  And four that must be rejected:
+    5. a quantity select (label is UI vocabulary)
+    6. a select of 1..n with a label that does not say quantity (shape gives it away)
+    7. a survey fieldset whose label is a question and whose accessible names
+       narrate the widget
+    8. a picker inside a dialog
+-->
+<html lang="en">
+<head><title>Picker Widget</title></head>
+<body>
+<main>
+  <h1>Picker Widget</h1>
+
+  <div role="radiogroup">
+    <button role="radio" aria-label="Size Option: Small" title="Small">Small</button>
+    <button role="radio" aria-label="Size Option: Medium" title="Medium">Medium</button>
+    <button role="radio" aria-label="Size Option: Large" title="Large">Large</button>
+  </div>
+
+  <div role="radiogroup">
+    <button role="radio"><img src="/s1.png" alt="Colour Option: Black, &pound;34.00"></button>
+    <button role="radio"><img src="/s2.png" alt="Colour Option: Sand, &pound;34.00"></button>
+  </div>
+
+  <div role="group" aria-label="Waist">
+    <button aria-pressed="false" value="w30">30</button>
+    <button aria-pressed="false" value="w32">32</button>
+    <button aria-pressed="true" value="w34">34</button>
+  </div>
+
+  <fieldset>
+    <legend>Fit</legend>
+    <label><input type="radio" name="fit" value="Regular"> Regular</label>
+    <label><input type="radio" name="fit" value="Tall"> Tall</label>
+  </fieldset>
+
+  <select name="quantity">
+    <option value="">Select</option>
+    <option value="1">1</option>
+    <option value="2">2</option>
+    <option value="3">3</option>
+  </select>
+
+  <select name="how-many">
+    <option value="1">1</option>
+    <option value="2">2</option>
+    <option value="3">3</option>
+    <option value="4">4</option>
+  </select>
+
+  <fieldset id="survey-group">
+    <label for="survey-group">Are you a home owner?</label>
+    <label><input type="radio" name="owner" value="Yes" aria-label="Home owner radio yes button"></label>
+    <label><input type="radio" name="owner" value="No" aria-label="Home owner radio no button"></label>
+  </fieldset>
+
+  <div role="dialog" aria-label="Find a store">
+    <select name="state">
+      <option value="AL">Alabama</option>
+      <option value="AK">Alaska</option>
+      <option value="AZ">Arizona</option>
+    </select>
+  </div>
+</main>
+</body>
+</html>

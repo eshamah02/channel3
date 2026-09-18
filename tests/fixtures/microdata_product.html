@@ -1,0 +1,42 @@
+<!doctype html>
+<!--
+  Hand-written from the HTML Microdata spec plus schema.org/Product. No JSON-LD
+  at all. Exercises:
+    - value resolution per tag: meta/content, link/href, img/src, plain text
+    - a nested Brand item whose itemprop="name" must become brand, not name
+    - a nested Offer item carrying price and currency
+    - a second Product item (related rail) with fewer properties, which must
+      lose to the richer main item
+-->
+<html lang="en">
+<head><title>Fixture Microdata</title></head>
+<body>
+
+<div itemscope itemtype="https://schema.org/Product">
+  <h1 itemprop="name">Microdata Widget</h1>
+  <p itemprop="description">Described entirely with attributes.</p>
+
+  <div itemprop="brand" itemscope itemtype="https://schema.org/Brand">
+    <span itemprop="name">Attribute Brand</span>
+  </div>
+
+  <img itemprop="image" src="https://cdn.test/micro-1.jpg" alt="Widget">
+  <img itemprop="image" src="https://cdn.test/micro-2.jpg" alt="Widget back">
+
+  <meta itemprop="color" content="Olive">
+
+  <div itemprop="offers" itemscope itemtype="https://schema.org/Offer">
+    <span itemprop="price" content="74.50">$74.50</span>
+    <meta itemprop="priceCurrency" content="USD">
+    <link itemprop="availability" href="https://schema.org/InStock">
+  </div>
+</div>
+
+<aside>
+  <div itemscope itemtype="https://schema.org/Product">
+    <span itemprop="name">Related Trinket</span>
+  </div>
+</aside>
+
+</body>
+</html>

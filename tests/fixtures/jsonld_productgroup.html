@@ -1,0 +1,68 @@
+<!doctype html>
+<!--
+  Hand-written from schema.org/ProductGroup. Exercises variesBy declaring the
+  axes, hasVariant carrying the matrix, per-variant sku/offers/availability, and
+  additionalProperty for an axis the core vocabulary has no term for.
+
+  The matrix is deliberately sparse: Sand/M is never offered, so the derived
+  axes must still advertise both colours and both sizes.
+-->
+<html lang="en">
+<head>
+  <title>Fixture Group</title>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "ProductGroup",
+    "name": "Grouped Tee",
+    "description": "A tee with a variant matrix.",
+    "brand": { "@type": "Brand", "name": "Group Brand" },
+    "variesBy": ["https://schema.org/color", "https://schema.org/size"],
+    "hasVariant": [
+      {
+        "@type": "Product",
+        "sku": "TEE-CHAR-S",
+        "color": "Charcoal",
+        "size": "S",
+        "image": "https://cdn.test/tee-charcoal.jpg",
+        "offers": {
+          "@type": "Offer",
+          "price": "32.00",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock"
+        }
+      },
+      {
+        "@type": "Product",
+        "sku": "TEE-CHAR-M",
+        "color": "Charcoal",
+        "size": "M",
+        "offers": {
+          "@type": "Offer",
+          "price": "32.00",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/OutOfStock"
+        }
+      },
+      {
+        "@type": "Product",
+        "sku": "TEE-SAND-S",
+        "color": "Sand",
+        "size": "S",
+        "additionalProperty": {
+          "@type": "PropertyValue",
+          "name": "Fit",
+          "value": "Relaxed"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "34.00",
+          "priceCurrency": "USD"
+        }
+      }
+    ]
+  }
+  </script>
+</head>
+<body><h1>Grouped Tee</h1></body>
+</html>

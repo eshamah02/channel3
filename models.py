@@ -33,14 +33,9 @@ class Price(BaseModel):
 class VariantAttribute(BaseModel):
     """One axis/value pair on a variant, e.g. name="Size", value="M".
 
-    Modelled as an explicit name/value pair rather than dict[str, str] because
-    this shape comes back from the model as structured output: JSON Schema
-    describes fixed-shape objects reliably, while an open-ended map needs
-    additionalProperties and generates inconsistently.
-
-    Axis names are whatever the page uses -- Size, Color, Fit, Voltage, Finish.
-    A fixed vocabulary would be a guess about the catalogue and would fail on
-    anything that isn't apparel.
+    A name/value pair rather than dict[str, str] because this comes back from the
+    model as structured output, and JSON Schema handles fixed shapes far more
+    reliably than open-ended maps. Axis names come from the page, never a fixed list.
     """
 
     name: str
@@ -50,9 +45,8 @@ class VariantAttribute(BaseModel):
 class Variant(BaseModel):
     """One discrete, purchasable configuration of a product.
 
-    Every field except option_values is optional because pages vary in what
-    they publish per variant: some carry a full per-SKU price and stock matrix,
-    others only list the selectable values.
+    Only option_values is required: some pages publish a full per-SKU price and
+    stock matrix, others only the selectable values.
     """
 
     option_values: list[VariantAttribute]
@@ -65,9 +59,8 @@ class Variant(BaseModel):
 class VariantOption(BaseModel):
     """One selectable axis and its values, e.g. name="Size", values=["S","M"].
 
-    Derived from the variant list in Python (see extraction/derive.py), never
-    generated. Two independently-produced representations of the same facts can
-    disagree; one derived from the other cannot.
+    Derived from the variant list rather than generated: two independent
+    representations of the same facts can disagree, one derived from the other cannot.
     """
 
     name: str
@@ -89,13 +82,61 @@ class Product(BaseModel):
     variants: list[Variant]
 
 
+class VariantAxis(BaseModel):
+    """One selectable axis after the model has tidied it up.
+
+    Used only when the matrix was read off the page's own controls, where labels are
+    often plural or generic and the same axis can appear under two headings. Same
+    shape as VariantOption but kept separate: this one is model input, arriving before
+    variants exist, while VariantOption is derived from the finished variant list.
+    """
+
+    name: str
+    values: list[str]
+
+
+# Declared without defaults and with explicit nullability, because strict structured
+# output requires every property to be present in the response.
+class FactsResponse(BaseModel):
+    """The judgement call: choose between candidates and normalise formats.
+
+    price is flat rather than a nested Price so the compare-at invariants can be
+    enforced in Python. Note the omission of image_urls: those are harvested
+    deterministically and the model never gets to rewrite them.
+    """
+
+    name: str
+    brand: str
+    price: float
+    currency: str
+    compare_at_price: float | None
+    colors: list[str]
+    axes: list[VariantAxis]
+    video_url: str | None
+
+
+class ProseResponse(BaseModel):
+    """Synthesis, not extraction. No standard carries either of these fields."""
+
+    description: str
+    key_features: list[str]
+
+
+class CategoryChoice(BaseModel):
+    """One step of the taxonomy descent, as an index into offered options.
+
+    An index rather than a name: the model picks from a list of real children, so
+    it has no way to return a string that is not in the taxonomy.
+    """
+
+    choice: int
+
+
 class ExtractionMetadata(BaseModel):
     """How this product was extracted, not what it is.
 
-    Kept off Product so their schema stays as delivered. Useful to a reviewer
-    auditing extraction quality, and to a downstream agent that wants a
-    confidence signal: a price sourced from JSON-LD (tier A) is a different
-    claim than one read off rendered text (tier D).
+    Kept off Product so that schema stays as delivered. A price from JSON-LD is a
+    different claim from one read off rendered text, and this is where that shows.
     """
 
     # field name -> provenance tier of the value that won, e.g. {"price.price": "A"}
@@ -105,17 +146,26 @@ class ExtractionMetadata(BaseModel):
     cost_usd: float = 0.0
 
 
-class ExtractedProduct(BaseModel):
-    """Envelope around an unmodified Product.
+class ProductSummary(BaseModel):
+    """Grid-sized view of a product, for the catalogue listing.
 
-    Everything the pipeline knows that isn't part of the product itself lives
-    here: identity, provenance, and the derived variant axes.
+    A card needs a name, a price and one image; shipping the full variant matrix per
+    card makes the list response many times larger than the page can use.
     """
 
-    # sha256 of the canonical URL, truncated. Hashing the URL rather than the
-    # page content keeps the id stable across re-crawls -- a content hash would
-    # mint a new id every time the site fixed a typo. It also needs no global
-    # coordination, which slug-uniqueness would at catalogue scale.
+    id: str
+    slug: str
+    name: str
+    brand: str
+    price: Price
+    image_url: str | None = None
+
+
+class ExtractedProduct(BaseModel):
+    """Envelope around an unmodified Product: identity, provenance, derived axes."""
+
+    # Truncated sha256 of the canonical URL. Hashing the URL rather than the content
+    # keeps the id stable across re-crawls and needs no global coordination.
     id: str
     slug: str
     source_url: str | None = None

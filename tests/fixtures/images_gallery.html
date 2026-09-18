@@ -1,0 +1,73 @@
+<!doctype html>
+<!--
+  Hand-written. Image sources in the order harvest() should prefer them, plus the
+  furniture it must reject.
+
+  Keeps: a JSON-LD declared gallery, a preload hint with imagesrcset, a <picture>
+  with a responsive source list, an img[srcset] using x descriptors, a plain
+  img[src], and a lazy-loaded data-src.
+
+  Rejects: an inline data: URI, a 1x1 beacon, an SVG icon, a file whose name is a
+  logo, an image inside <nav>, an image inside <footer>, an icon-sized img, and an
+  image on a host that never serves declared product photography.
+-->
+<html lang="en">
+<head>
+  <title>Gallery Widget</title>
+  <link rel="canonical" href="https://shop.test/products/gallery-widget">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    "name": "Gallery Widget",
+    "image": [
+      "https://cdn.test/products/hero.jpg?w=800&q=70",
+      "//cdn.test/products/second.jpg"
+    ],
+    "offers": {"@type": "Offer", "price": "10.00", "priceCurrency": "USD"}
+  }
+  </script>
+
+  <link rel="preload" as="image"
+        imagesrcset="https://cdn.test/products/preload-400.jpg 400w, https://cdn.test/products/preload-1600.jpg 1600w"
+        href="https://cdn.test/products/preload-400.jpg">
+</head>
+<body>
+
+<nav>
+  <img src="https://cdn.test/promo/megamenu-banner.jpg" alt="Menu promo">
+</nav>
+
+<main>
+  <h1>Gallery Widget</h1>
+
+  <picture>
+    <source srcset="https://cdn.test/products/art-320.jpg 320w,
+                    https://cdn.test/products/art-2000.jpg 2000w">
+    <img src="https://cdn.test/products/art-320.jpg" alt="Gallery Widget angle">
+  </picture>
+
+  <img srcset="https://cdn.test/products/retina-1x.jpg 1x, https://cdn.test/products/retina-3x.jpg 3x"
+       src="https://cdn.test/products/retina-1x.jpg" alt="Gallery Widget detail">
+
+  <img src="/products/relative.jpg" alt="Gallery Widget relative">
+
+  <img data-src="https://cdn.test/products/lazy.jpg" alt="Gallery Widget lazy">
+
+  <img src="https://cdn.test/products/hero.jpg?w=200&amp;fmt=auto" alt="Gallery Widget small copy">
+
+  <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="inline">
+  <img src="https://cdn.test/t.gif?w=1&amp;h=1" alt="">
+  <img src="https://cdn.test/ui/chevron.svg" alt="">
+  <img src="https://cdn.test/brand/ace_logo.png" alt="">
+  <img src="https://cdn.test/products/thumb.jpg" width="48" height="48" alt="">
+  <img src="https://reviews.test/user/photo.jpg" alt="Customer photo">
+</main>
+
+<footer>
+  <img src="https://cdn.test/promo/newsletter.jpg" alt="Sign up">
+</footer>
+
+</body>
+</html>

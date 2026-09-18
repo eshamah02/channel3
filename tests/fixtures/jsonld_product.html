@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  Hand-written from the schema.org/Product example shapes. Exercises:
+  brand as an object, image as a list, a single Offer, color, and a VideoObject.
+-->
+<html lang="en">
+<head>
+  <title>Fixture Product</title>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    "name": "Structured Widget",
+    "description": "A widget described in JSON-LD.",
+    "sku": "SW-001",
+    "color": "Slate",
+    "brand": { "@type": "Brand", "name": "Fixture Brand" },
+    "image": [
+      "https://cdn.test/widget-1.jpg",
+      "https://cdn.test/widget-2.jpg"
+    ],
+    "video": {
+      "@type": "VideoObject",
+      "name": "Widget demo",
+      "contentUrl": "https://cdn.test/widget.mp4"
+    },
+    "offers": {
+      "@type": "Offer",
+      "price": "49.95",
+      "priceCurrency": "USD",
+      "availability": "https://schema.org/InStock"
+    }
+  }
+  </script>
+</head>
+<body>
+  <h1>Structured Widget</h1>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  Hand-written from ogp.me plus the product:* commerce extension. No JSON-LD,
+  no microdata. Exercises:
+    - og:title carrying store furniture around the name, which arbitration trims
+    - product:price:* and product:brand
+    - twitter:* as a parallel declaration of the same facts
+    - og:site_name naming the retailer while product:brand names the maker,
+      which is the reason site_name is demoted to tier D
+    - link[rel=canonical] as the id/base-URL source
+-->
+<html lang="en">
+<head>
+  <title>Meta Widget | Free Shipping | Example Store</title>
+  <link rel="canonical" href="https://shop.test/products/meta-widget">
+
+  <meta property="og:title" content="Meta Widget | Free Shipping | Example Store">
+  <meta property="og:description" content="A widget described only in metadata.">
+  <meta property="og:image" content="https://cdn.test/meta-widget.jpg">
+  <meta property="og:url" content="https://shop.test/products/meta-widget">
+  <meta property="og:site_name" content="Example Store">
+
+  <meta property="product:price:amount" content="59.00">
+  <meta property="product:price:currency" content="AUD">
+  <meta property="product:original_price:amount" content="79.00">
+  <meta property="product:brand" content="Meta Maker">
+
+  <meta name="twitter:title" content="Meta Widget">
+  <meta name="twitter:description" content="A widget described only in metadata.">
+  <meta name="twitter:image" content="https://cdn.test/meta-widget-social.jpg">
+
+  <meta name="description" content="A widget described only in metadata.">
+</head>
+<body><h1>Meta Widget</h1></body>
+</html>

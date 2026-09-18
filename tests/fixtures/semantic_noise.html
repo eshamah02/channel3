@@ -1,0 +1,46 @@
+<!doctype html>
+<!--
+  Hand-written. Everything semantic_html() is supposed to remove, wrapped around a
+  small amount of content it must keep: presentational attributes, an event
+  handler, a style block, a template, an svg, a chain of bare wrapper divs, an
+  inline base64 image, a responsive <picture> block, preload links, an
+  application-state script, and a JSON-LD block that must survive intact.
+-->
+<html lang="en">
+<head>
+  <title>Noisy Widget</title>
+  <style>.a{color:red}.b{color:blue}.c{margin:0}</style>
+  <link rel="preload" as="image" href="https://cdn.test/preload.jpg">
+  <link rel="stylesheet" href="https://cdn.test/app.css">
+  <link rel="canonical" href="https://shop.test/noisy">
+  <meta property="og:title" content="Noisy Widget">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"Product","name":"Noisy Widget","offers":{"@type":"Offer","price":"5.00","priceCurrency":"USD"}}
+  </script>
+  <script type="application/json">
+  {"hydration":{"padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}
+  </script>
+  <script>var tracking = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";</script>
+</head>
+<body class="page theme-light" onload="init()">
+  <div class="wrap">
+    <div class="inner">
+      <div>
+        <main id="content" class="main-col">
+          <h1 class="title" style="font-size:2rem">Noisy Widget</h1>
+          <p class="copy" data-testid="blurb" itemprop="description">A widget with a lot of noise around it.</p>
+          <picture>
+            <source srcset="https://cdn.test/w-320.jpg 320w, https://cdn.test/w-640.jpg 640w, https://cdn.test/w-1280.jpg 1280w">
+            <img src="https://cdn.test/w-1280.jpg" alt="Noisy Widget front" class="hero">
+          </picture>
+          <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==" alt="inline pixel">
+          <div class="empty-a"></div>
+          <span class="empty-b"></span>
+          <svg viewBox="0 0 10 10"><path d="M0 0 L10 10"/></svg>
+          <template><div>never rendered</div></template>
+        </main>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

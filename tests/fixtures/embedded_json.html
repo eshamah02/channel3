@@ -1,0 +1,58 @@
+<!doctype html>
+<!--
+  Hand-written. The three places client-side state hides:
+    1. script[type=application/json] with the product nested several levels down
+    2. an inline script assignment, window.X = {...}
+    3. a data-* attribute whose value is JSON
+
+  Also includes decoys that must not win: a recommendations entry with the same
+  shape but fewer fields, and a navigation dict that has a name but no price or
+  identifier so it is not product-shaped at all.
+-->
+<html lang="en">
+<head><title>Embedded Widget</title></head>
+<body>
+
+<script type="application/json">
+{
+  "page": {
+    "layout": {
+      "sections": [
+        {
+          "kind": "detail",
+          "data": {
+            "product": {
+              "productName": "Embedded Widget",
+              "sku": "EW-77",
+              "salePrice": "88.50",
+              "listPrice": "110.00",
+              "currencyCode": "EUR",
+              "shortDescription": "Found inside application state.",
+              "brand": { "name": "State Brand" },
+              "colorName": "Ink",
+              "images": ["https://cdn.test/embedded-1.jpg"]
+            }
+          }
+        },
+        {
+          "kind": "recommendations",
+          "items": [
+            { "name": "Cheaper Decoy", "price": "4.00" }
+          ]
+        }
+      ]
+    },
+    "nav": { "name": "Shop all", "href": "/all" }
+  }
+}
+</script>
+
+<script>
+  window.__CHECKOUT__ = {"cart": {"name": "Cart stub", "sku": "CART"}};
+</script>
+
+<div data-product-preload='{"name":"Attribute Widget","sku":"AW-1","price":"12.00"}'></div>
+
+<h1>Embedded Widget</h1>
+</body>
+</html>

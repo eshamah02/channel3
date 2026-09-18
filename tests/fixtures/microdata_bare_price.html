@@ -1,0 +1,22 @@
+<!doctype html>
+<!--
+  Hand-written. The loose-microdata case: itemprop attributes with no enclosing
+  itemscope, which the spec does not sanction but which publishers ship
+  constantly. Zero JSON-LD, zero OpenGraph.
+
+  Also carries three priceCurrency declarations, none of them scoped -- so the
+  conflict has to be resolved and recorded rather than silently taking one.
+-->
+<html lang="en-GB">
+<head>
+  <title>Bare Widget - Example Store</title>
+  <meta itemprop="priceCurrency" content="GBP">
+  <meta itemprop="priceCurrency" content="EUR">
+  <meta itemprop="priceCurrency" content="GBP">
+</head>
+<body>
+  <h1>Bare Widget</h1>
+  <span itemprop="price" content="18.99">&pound;18.99</span>
+  <span itemprop="highPrice" content="24.99">&pound;24.99</span>
+</body>
+</html>

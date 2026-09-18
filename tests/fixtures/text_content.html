@@ -1,0 +1,50 @@
+<!doctype html>
+<!--
+  Hand-written. Rendered content only: no JSON-LD, no microdata, no OpenGraph.
+  Exercises:
+    - a was/now price pair, adjacent in the text, in the order pages write them
+    - the currency symbol split across two elements, so the symbol and digits are
+      separated by whitespace once the text is joined
+    - an unrelated price far away (a shipping threshold) that must not become the
+      compare-at figure
+    - a feature list in <main>, and a navigation list that must be ignored
+-->
+<html lang="en-GB">
+<head><title>Rendered Widget - Store</title></head>
+<body>
+
+<nav aria-label="Breadcrumb">
+  <ul>
+    <li><a href="/">Home</a></li>
+    <li><a href="/tools">Tools</a></li>
+    <li><a href="/tools/widgets">Widgets</a></li>
+  </ul>
+</nav>
+
+<main>
+  <h1>Rendered Widget</h1>
+
+  <p class="price">
+    <span>&pound;</span><span>34.00</span>
+    <s>&pound;42.50</s>
+  </p>
+
+  <ul>
+    <li>Forged steel body</li>
+    <li>Weighs 240 g</li>
+    <li>Two-year guarantee</li>
+    <li>Made in Sheffield</li>
+  </ul>
+</main>
+
+<footer>
+  <p>Free delivery on orders over &pound;150.</p>
+  <ul>
+    <li><a href="/help">Help</a></li>
+    <li><a href="/returns">Returns</a></li>
+    <li><a href="/contact">Contact</a></li>
+  </ul>
+</footer>
+
+</body>
+</html>
